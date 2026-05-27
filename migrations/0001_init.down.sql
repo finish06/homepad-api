@@ -1,0 +1,4 @@
+DROP TABLE IF EXISTS user_layout;
+DROP TABLE IF EXISTS favorites;
+DROP TABLE IF EXISTS services;
+DROP TABLE IF EXISTS users;

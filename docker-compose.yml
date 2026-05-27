@@ -1,0 +1,30 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: homepad
+      POSTGRES_PASSWORD: homepad
+      POSTGRES_DB: homepad
+    ports:
+      - "5432:5432"
+    volumes:
+      - homepad_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U homepad -d homepad"]
+      interval: 2s
+      timeout: 2s
+      retries: 10
+
+  api:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://homepad:homepad@postgres:5432/homepad?sslmode=disable
+    ports:
+      - "8080:8080"
+
+volumes:
+  homepad_pg:
