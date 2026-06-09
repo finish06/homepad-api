@@ -15,7 +15,7 @@ import (
 // AC A6 — Admin can CRUD catalog; non-admin gets 403.
 
 func TestUserCannotCreateService_403(t *testing.T) {
-	s := testsupport.NewServer()
+	s := testsupport.NewServer(t)
 	defer s.Close()
 
 	body, _ := json.Marshal(map[string]any{
@@ -38,7 +38,7 @@ func TestUserCannotCreateService_403(t *testing.T) {
 }
 
 func TestAdminCanCreateService_201(t *testing.T) {
-	s := testsupport.NewServer()
+	s := testsupport.NewServer(t)
 	defer s.Close()
 
 	body, _ := json.Marshal(map[string]any{
@@ -61,7 +61,7 @@ func TestAdminCanCreateService_201(t *testing.T) {
 }
 
 func TestAdminCanEditService_200(t *testing.T) {
-	s := testsupport.NewServer()
+	s := testsupport.NewServer(t)
 	defer s.Close()
 
 	body, _ := json.Marshal(map[string]any{"name": "Gitea (renamed)"})
@@ -77,7 +77,7 @@ func TestAdminCanEditService_200(t *testing.T) {
 }
 
 func TestAdminCanDeleteService_204(t *testing.T) {
-	s := testsupport.NewServer()
+	s := testsupport.NewServer(t)
 	defer s.Close()
 
 	req, _ := http.NewRequest(http.MethodDelete, s.URL+"/api/services/some-id", nil)

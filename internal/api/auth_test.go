@@ -15,7 +15,7 @@ import (
 // AC A1 — Register / login / logout with email + password.
 
 func TestRegisterCreatesUser(t *testing.T) {
-	s := testsupport.NewServer()
+	s := testsupport.NewServer(t)
 	defer s.Close()
 
 	body, _ := json.Marshal(map[string]string{
@@ -31,7 +31,7 @@ func TestRegisterCreatesUser(t *testing.T) {
 }
 
 func TestLoginSetsSessionCookie(t *testing.T) {
-	s := testsupport.NewServer()
+	s := testsupport.NewServer(t)
 	defer s.Close()
 
 	// GREEN phase will register first; this skeleton just asserts shape.
@@ -58,7 +58,7 @@ func TestLoginSetsSessionCookie(t *testing.T) {
 }
 
 func TestMeUnauthorized(t *testing.T) {
-	s := testsupport.NewServer()
+	s := testsupport.NewServer(t)
 	defer s.Close()
 
 	resp, err := http.Get(s.URL + "/api/me")
@@ -70,7 +70,7 @@ func TestMeUnauthorized(t *testing.T) {
 }
 
 func TestMeAuthorized(t *testing.T) {
-	s := testsupport.NewServer()
+	s := testsupport.NewServer(t)
 	defer s.Close()
 
 	// GREEN phase: full register → login → use returned cookie.
@@ -85,7 +85,7 @@ func TestMeAuthorized(t *testing.T) {
 }
 
 func TestLogoutClearsSession(t *testing.T) {
-	s := testsupport.NewServer()
+	s := testsupport.NewServer(t)
 	defer s.Close()
 
 	req, _ := http.NewRequest(http.MethodPost, s.URL+"/api/logout", nil)

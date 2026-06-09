@@ -1,0 +1,152 @@
+package api
+
+import (
+	"encoding/json"
+	"errors"
+	"net/http"
+	"strings"
+
+	"golang.org/x/crypto/bcrypt"
+
+	"gitea.kube.calebdunn.tech/code/homepad-api/internal/storage"
+)
+
+type credentials struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+}
+
+type userView struct {
+	ID    string `json:"id"`
+	Email string `json:"email"`
+	Role  string `json:"role"`
+}
+
+func (s *server) handleRegister(w http.ResponseWriter, r *http.Request) {
+	c, ok := decodeCredentials(w, r)
+	if !ok {
+		return
+	}
+
+	ctx := r.Context()
+	count, err := s.store.CountUsers(ctx)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	// First registered user bootstraps as admin (spec Q2); after that,
+	// self-registration is only allowed when HOMEPAD_REGISTRATION=open.
+	role := "user"
+	if count == 0 {
+		role = "admin"
+	} else if s.registration == "invite_only" {
+		http.Error(w, "registration is invite-only", http.StatusForbidden)
+		return
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(c.Password), bcrypt.DefaultCost)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	u, err := s.store.CreateUser(ctx, c.Email, string(hash), role)
+	if errors.Is(err, storage.ErrEmailTaken) {
+		http.Error(w, "email already registered", http.StatusConflict)
+		return
+	}
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, userView{ID: u.ID, Email: u.Email, Role: u.Role})
+}
+
+func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
+	c, ok := decodeCredentials(w, r)
+	if !ok {
+		return
+	}
+
+	u, err := s.store.UserByEmail(r.Context(), c.Email)
+	if err != nil || bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(c.Password)) != nil {
+		http.Error(w, "invalid email or password", http.StatusUnauthorized)
+		return
+	}
+
+	token, err := s.sessions.Create(u.ID)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookie,
+		Value:    token,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
+	writeJSON(w, http.StatusOK, userView{ID: u.ID, Email: u.Email, Role: u.Role})
+}
+
+func (s *server) handleLogout(w http.ResponseWriter, r *http.Request) {
+	if ck, err := r.Cookie(sessionCookie); err == nil {
+		s.sessions.Destroy(ck.Value)
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookie,
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   -1,
+	})
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *server) handleMe(w http.ResponseWriter, r *http.Request) {
+	u, ok := s.currentUser(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	writeJSON(w, http.StatusOK, userView{ID: u.ID, Email: u.Email, Role: u.Role})
+}
+
+func (s *server) currentUser(r *http.Request) (storage.User, bool) {
+	ck, err := r.Cookie(sessionCookie)
+	if err != nil {
+		return storage.User{}, false
+	}
+	userID, ok := s.sessions.UserID(ck.Value)
+	if !ok {
+		return storage.User{}, false
+	}
+	u, err := s.store.UserByID(r.Context(), userID)
+	if err != nil {
+		return storage.User{}, false
+	}
+	return u, true
+}
+
+func decodeCredentials(w http.ResponseWriter, r *http.Request) (credentials, bool) {
+	var c credentials
+	if err := json.NewDecoder(r.Body).Decode(&c); err != nil {
+		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		return c, false
+	}
+	c.Email = strings.TrimSpace(c.Email)
+	if c.Email == "" || c.Password == "" {
+		http.Error(w, "email and password are required", http.StatusBadRequest)
+		return c, false
+	}
+	return c, true
+}
+
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
+}

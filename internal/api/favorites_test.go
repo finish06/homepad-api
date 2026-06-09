@@ -15,7 +15,7 @@ import (
 // AC A5 — Per-user favorites + manual sort order persist across sessions.
 
 func TestMarkFavoritePersistsAcrossSessions(t *testing.T) {
-	s := testsupport.NewServer()
+	s := testsupport.NewServer(t)
 	defer s.Close()
 
 	// Session 1: mark a favorite.
@@ -53,7 +53,7 @@ func TestMarkFavoritePersistsAcrossSessions(t *testing.T) {
 }
 
 func TestPersonalSortOrderPersistsAcrossSessions(t *testing.T) {
-	s := testsupport.NewServer()
+	s := testsupport.NewServer(t)
 	defer s.Close()
 
 	order := map[string]any{"order": []string{"service-id-3", "service-id-1", "service-id-2"}}
