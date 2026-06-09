@@ -165,6 +165,54 @@ func (s *Store) CreateService(ctx context.Context, in Service) (Service, error) 
 	return sv, nil
 }
 
+// AddFavorite marks serviceID as a favorite for userID. Idempotent: marking an
+// already-favorited service is a no-op. Returns ErrNotFound when serviceID does
+// not name a real service (FK violation or malformed UUID).
+func (s *Store) AddFavorite(ctx context.Context, userID, serviceID string) error {
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO favorites (user_id, service_id) VALUES ($1, $2)
+		 ON CONFLICT DO NOTHING`,
+		userID, serviceID)
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && (pgErr.Code == "23503" || pgErr.Code == "22P02") {
+		return ErrNotFound
+	}
+	return err
+}
+
+// RemoveFavorite unmarks serviceID for userID. Idempotent: removing a favorite
+// that isn't set (or a malformed id) succeeds with no effect.
+func (s *Store) RemoveFavorite(ctx context.Context, userID, serviceID string) error {
+	_, err := s.pool.Exec(ctx,
+		`DELETE FROM favorites WHERE user_id = $1 AND service_id = $2`,
+		userID, serviceID)
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "22P02" { // malformed UUID: nothing to delete
+		return nil
+	}
+	return err
+}
+
+// FavoriteIDs returns the set of service ids userID has favorited.
+func (s *Store) FavoriteIDs(ctx context.Context, userID string) (map[string]bool, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT service_id FROM favorites WHERE user_id = $1`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	set := make(map[string]bool)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		set[id] = true
+	}
+	return set, rows.Err()
+}
+
 func (s *Store) userBy(ctx context.Context, where string, arg any) (User, error) {
 	var u User
 	err := s.pool.QueryRow(ctx,

@@ -52,6 +52,9 @@ func NewServer(t *testing.T) *httptest.Server {
 	sessions.Bind("non-admin-session", user)
 	sessions.Bind("any-user", user)
 	sessions.Bind("real-once-impl-exists", user)
+	// A5 favorites test signs the same user in twice to prove persistence.
+	sessions.Bind("session-one", user)
+	sessions.Bind("session-two", user)
 
 	// Two monitored catalog entries so /api/services is non-empty. Gatus points
 	// at a black hole below, so both resolve UNKNOWN (A9).

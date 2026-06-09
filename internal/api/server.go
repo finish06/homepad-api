@@ -43,19 +43,19 @@ func New(d Deps) http.Handler {
 		mux.HandleFunc("GET /api/me", s.handleMe)
 		mux.HandleFunc("GET /api/services", s.handleListServices)
 		mux.HandleFunc("POST /api/services", s.handleCreateService)
+		mux.HandleFunc("POST /api/favorites/{id}", s.handleAddFavorite)
+		mux.HandleFunc("DELETE /api/favorites/{id}", s.handleRemoveFavorite)
 		mux.HandleFunc("GET /api/status", s.handleStatus)
 		mux.HandleFunc("GET /health", s.handleHealth)
 	} else {
-		for _, p := range []string{"POST /api/register", "POST /api/login", "POST /api/logout", "GET /api/me", "GET /api/services", "POST /api/services", "GET /api/status", "GET /health"} {
+		for _, p := range []string{"POST /api/register", "POST /api/login", "POST /api/logout", "GET /api/me", "GET /api/services", "POST /api/services", "POST /api/favorites/{id}", "DELETE /api/favorites/{id}", "GET /api/status", "GET /health"} {
 			mux.HandleFunc(p, notImplemented)
 		}
 	}
 
-	// Still stubbed — catalog edit/delete, favorites, layout land in later slices.
+	// Still stubbed — catalog edit/delete and personal layout land in later slices.
 	mux.HandleFunc("PATCH /api/services/{id}", notImplemented)
 	mux.HandleFunc("DELETE /api/services/{id}", notImplemented)
-	mux.HandleFunc("POST /api/favorites/{id}", notImplemented)
-	mux.HandleFunc("DELETE /api/favorites/{id}", notImplemented)
 	mux.HandleFunc("PUT /api/layout", notImplemented)
 
 	mux.HandleFunc("GET /live", handleLive)

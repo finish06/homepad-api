@@ -18,18 +18,25 @@ type serviceView struct {
 	URL         string `json:"url"`
 	Icon        string `json:"icon"`
 	Status      string `json:"status"`
+	Favorite    bool   `json:"favorite"`
 }
 
 // handleListServices serves the shared catalog with a live status badge per
 // tile, merged from the in-memory Gatus snapshot. It never proxies to Gatus, so
 // it cannot 5xx on Gatus being down (A9) — those tiles just resolve to UNKNOWN.
 func (s *server) handleListServices(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.currentUser(r); !ok {
+	u, ok := s.currentUser(r)
+	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
 	svcs, err := s.store.ListServices(r.Context())
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	favs, err := s.store.FavoriteIDs(r.Context(), u.ID)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
@@ -46,6 +53,7 @@ func (s *server) handleListServices(w http.ResponseWriter, r *http.Request) {
 			URL:         sv.URL,
 			Icon:        sv.Icon,
 			Status:      statusFor(snap, sv.GatusKey),
+			Favorite:    favs[sv.ID],
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"services": out})
