@@ -31,7 +31,7 @@ func (s *server) handleListServices(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	svcs, err := s.store.ListServices(r.Context())
+	svcs, err := s.store.ListServices(r.Context(), u.ID)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return

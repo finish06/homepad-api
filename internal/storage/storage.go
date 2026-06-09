@@ -61,24 +61,42 @@ func Open(ctx context.Context, dsn string) (*Store, error) {
 	return &Store{DSN: dsn, pool: pool}, nil
 }
 
-// Migrate applies every embedded *.up.sql migration in lexical order. The
-// migrations are written with IF NOT EXISTS so re-running on boot is a no-op.
+// migrateLockKey is an arbitrary fixed key for the advisory lock that
+// serializes Migrate. It guards against concurrent migrators racing on
+// CREATE EXTENSION (which is not concurrency-safe) — e.g. parallel test
+// binaries sharing a DB, or multiple replicas migrating on boot.
+const migrateLockKey = 0x686f6d6570616431 // "homepad1"
+
+// Migrate applies every embedded *.up.sql migration in lexical order, inside a
+// single transaction guarded by a session advisory lock so concurrent
+// migrators serialize. The migrations use IF NOT EXISTS, so re-running is a
+// no-op.
 func (s *Store) Migrate(ctx context.Context) error {
 	names, err := fs.Glob(migrations.FS, "*.up.sql")
 	if err != nil {
 		return err
 	}
 	sort.Strings(names)
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, int64(migrateLockKey)); err != nil {
+		return fmt.Errorf("storage.Migrate: acquire lock: %w", err)
+	}
 	for _, name := range names {
 		sqlBytes, err := migrations.FS.ReadFile(name)
 		if err != nil {
 			return err
 		}
-		if _, err := s.pool.Exec(ctx, string(sqlBytes)); err != nil {
+		if _, err := tx.Exec(ctx, string(sqlBytes)); err != nil {
 			return fmt.Errorf("storage.Migrate: %s: %w", name, err)
 		}
 	}
-	return nil
+	return tx.Commit(ctx)
 }
 
 func (s *Store) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
@@ -121,11 +139,15 @@ func (s *Store) UserByID(ctx context.Context, id string) (User, error) {
 	return s.userBy(ctx, `WHERE id = $1`, id)
 }
 
-// ListServices returns the shared catalog ordered by name.
-func (s *Store) ListServices(ctx context.Context) ([]Service, error) {
+// ListServices returns the shared catalog in userID's personal layout order
+// (A5): services the user has placed come first by their saved sort_index, and
+// any not yet placed fall back to name order after them.
+func (s *Store) ListServices(ctx context.Context, userID string) ([]Service, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, slug, name, description, url, icon, COALESCE(gatus_key, '')
-		   FROM services ORDER BY name`)
+		`SELECT s.id, s.slug, s.name, s.description, s.url, s.icon, COALESCE(s.gatus_key, '')
+		   FROM services s
+		   LEFT JOIN user_layout ul ON ul.service_id = s.id AND ul.user_id = $1
+		  ORDER BY ul.sort_index NULLS LAST, s.name`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -283,6 +305,37 @@ func (s *Store) FavoriteIDs(ctx context.Context, userID string) (map[string]bool
 		set[id] = true
 	}
 	return set, rows.Err()
+}
+
+// SetLayout replaces userID's personal sort order (A5) with orderedIDs, where
+// position 0 sorts first. It is a full replacement: ids the user previously
+// placed but omitted here are dropped back to default ordering. Returns
+// ErrNotFound when any id does not name a real service (FK violation or
+// malformed UUID). The swap runs in one transaction so a failure leaves the
+// prior order intact.
+func (s *Store) SetLayout(ctx context.Context, userID string, orderedIDs []string) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx, `DELETE FROM user_layout WHERE user_id = $1`, userID); err != nil {
+		return err
+	}
+	for i, id := range orderedIDs {
+		_, err := tx.Exec(ctx,
+			`INSERT INTO user_layout (user_id, service_id, sort_index) VALUES ($1, $2, $3)`,
+			userID, id, i)
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && (pgErr.Code == "23503" || pgErr.Code == "22P02") {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
 }
 
 func (s *Store) userBy(ctx context.Context, where string, arg any) (User, error) {

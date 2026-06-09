@@ -3,7 +3,57 @@
 > NATS result reports are being lost to a harness bug, so this file is how I
 > talk to you, Joe. Updated + pushed every run. Newest run on top.
 
-## This run (2026-06-09) — A6 admin catalog edit + delete ✅
+## This run (2026-06-09) — A5 layout slice ✅ + WHOLE SUITE GREEN ON REAL POSTGRES ✅
+
+Two things this run: (1) finished the **A5 layout** slice — the last 501 stub is
+gone; (2) thanks to the throwaway test DB you stood up, **every DB-backed test
+now actually executes** (no more `t.Skip`). The full backend suite is green.
+
+**A5 layout (test-first, RED → GREEN):**
+- Rewrote `TestPersonalSortOrderPersistsAcrossSessions` (was skipped + used bogus
+  ids). It now PUTs a *reversed* order of the two real seeded services and proves
+  a fresh session reads `GET /api/services` back in that order. Confirmed RED
+  (501) before implementing.
+- `storage.SetLayout(userID, orderedIDs)` — full-replacement of a user's order in
+  one tx (delete-then-insert by position); a bogus/unknown id → `ErrNotFound`.
+- `ListServices` is now **order-aware**: `LEFT JOIN user_layout … ORDER BY
+  sort_index NULLS LAST, name`. Placed services first in saved order, unplaced
+  ones fall back to name order.
+- `PUT /api/layout` handler (`{"order":[ids]}` → 204, 404 on unknown id).
+  Wired into the live mux; **removed the last 501 stub.**
+
+**Verifying against your test DB (`DATABASE_URL` exported, ANSWER 1):**
+Running `go test ./...` with the DB exposed **3 genuine failures** that were
+hidden while everything skipped — all now fixed:
+1. *Cross-package migration race* — `CREATE EXTENSION IF NOT EXISTS` is not
+   concurrency-safe, so the api + storage test binaries migrating the shared DB
+   in parallel raced on `pg_extension_name_index` (23505). Fixed: `Migrate` now
+   runs inside one tx behind a `pg_advisory_xact_lock`, so concurrent migrators
+   serialize (also makes multi-replica boot safe). Plain `go test ./...` (parallel
+   packages) is now stable — ran 3× uncached, green each time.
+2. *`TestRegisterCreatesUser`* registered `alice@example.com`, but the fixture
+   seeds alice (the login test needs her) → 409. Test now registers a non-seeded
+   email.
+3. *`TestAdminCanCreateService_201`* created slug `gitea`, already seeded → 409.
+   Test now creates a non-seeded slug (`jellyfin`).
+
+**Verified results — `DATABASE_URL` set, `go test -count=1 ./...`:**
+- **21 tests PASS, 0 SKIP, 0 FAIL.** `go vet ./...` clean, `go build ./...` clean.
+- Tests that NOW ACTUALLY RAN (were `t.Skip` in every prior run):
+  - api: TestRegisterCreatesUser, TestLoginSetsSessionCookie, TestMeUnauthorized,
+    TestMeAuthorized, TestLogoutClearsSession, TestUserCannotCreateService_403,
+    TestAdminCanCreateService_201, TestAdminCanEditService_200,
+    TestUserCannotEditService_403, TestAdminCanDeleteService_204,
+    TestUserCannotDeleteService_403, TestMarkFavoritePersistsAcrossSessions,
+    **TestPersonalSortOrderPersistsAcrossSessions** (A5, new), and the gatus
+    black-hole + A11 no-leak suites.
+  - storage: TestStorageBootsWithDatabaseURL, TestMigrationsApplyCleanlyToFreshDB.
+- Tests skipped: **none.** (The poller tests never needed a DB; they pass too.)
+
+So A1, A5, A6, A9, A10, A11-backend are now **executed and green against real
+Postgres**, not green-by-construction. The backend is feature-complete for alpha.
+
+## Previous run (2026-06-09) — A6 admin catalog edit + delete ✅
 
 Completed the **A6** acceptance criterion (admin catalog CRUD). Create was
 already done; this run added **edit** and **delete**, test-first:
@@ -28,15 +78,15 @@ Only **one 501 stub remains:** `PUT /api/layout` (A5 personal sort order).
 
 ## Alpha checklist (A1–A11)
 
-Backend (this repo):
+Backend (this repo) — all now EXECUTED & GREEN on real Postgres:
 - [x] A1 — register / login / logout (sessions, bcrypt)
 - [x] A4 — status staleness < 60s (poller ≤ 30s, `as_of` exposed)
 - [x] A5 (favorites half) — per-user favorites persist
-- [ ] A5 (layout half) — personal sort order: `PUT /api/layout` + order-aware
-      `GET /api/services`. **Last 501 stub. Next run.**
-- [x] A6 — admin catalog create / edit / delete; non-admin 403 ← done this run
+- [x] A5 (layout half) — personal sort order: `PUT /api/layout` + order-aware
+      `GET /api/services` ← done this run; **last 501 stub removed**
+- [x] A6 — admin catalog create / edit / delete; non-admin 403
 - [x] A9 — Gatus unreachable → all UNKNOWN, no 5xx
-- [x] A10 — Postgres-backed, honors `DATABASE_URL` (code done; CI-verified only)
+- [x] A10 — Postgres-backed, honors `DATABASE_URL` (verified against test DB)
 - [x] A11 — Gatus URL never in any API response (backend half)
 - [x] `cmd/homepad-api/main.go` fully wired — opens Store, runs migrations on
       boot, starts the Poller. (Already done; re-confirmed.)
@@ -51,17 +101,15 @@ Frontend (`Code/homepad` repo — not yet started):
 
 ## Blockers / decisions
 
-- **NEEDS JOE: Is there CI that runs `make test-integration` against a real
-  Postgres?** This container has no Postgres/Docker, so every DB-backed
-  integration test (A1, A5, A6, A10, A11-backend) `t.Skip`s here — I can only
-  verify build/vet/compile + the no-DB poller tests locally. Those ACs are
-  written and GREEN-by-construction but are only *actually executed* where
-  `DATABASE_URL` is set. If there's no such CI, those ACs are unverified end to
-  end. Can you confirm a pipeline (or a reachable Postgres I'm allowed to use)
-  runs them?
-- **NEEDS JOE: Who builds the `Code/homepad` web app for alpha?** Alpha's
-  definition includes "the web app exercising those flows against the live API."
-  The backend will be feature-complete after the A5 layout slice, but the React
-  app (A2/A3/A7/A8 + the live-API wiring) is a separate, larger effort I haven't
-  started. Want me to pivot to it next, or finish the backend (A5 layout) first?
-  My default: finish A5 layout next run (kills the last 501), then start the web app.
+- **RESOLVED (ANSWER 1): DB-backed tests now verified.** You stood up
+  `homepad-testdb.stitch.svc.cluster.local:5432`. I exported `DATABASE_URL` and
+  ran the full suite against it — all integration tests execute and pass (see
+  this run's verified results above). No CI built by me, as instructed; you're
+  adding the durable Gitea Actions + Postgres-service workflow separately. Note
+  for that workflow: run `go test ./...` (parallel packages) is fine now that
+  `Migrate` is advisory-locked — no `-p 1` needed.
+- **RESOLVED (ANSWER 2): ordering approved.** Backend (A5 layout) finished this
+  run. **Next run I pivot to the `Code/homepad` web app** (A2/A3/A7/A8 + live-API
+  wiring). I own app code; you own the K8s deploy manifests.
+
+No open blockers. Backend is alpha-complete and green.

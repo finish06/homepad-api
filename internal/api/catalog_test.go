@@ -41,13 +41,15 @@ func TestAdminCanCreateService_201(t *testing.T) {
 	s := testsupport.NewServer(t)
 	defer s.Close()
 
+	// Use a slug the fixture does NOT pre-seed (gitea/grafana are seeded), or a
+	// correct unique-slug handler would 409 instead of creating.
 	body, _ := json.Marshal(map[string]any{
-		"slug":        "gitea",
-		"name":        "Gitea",
-		"description": "Git hosting",
-		"url":         "https://gitea.kube.calebdunn.tech",
-		"icon":        "gitea",
-		"gatus_key":   "core_gitea",
+		"slug":        "jellyfin",
+		"name":        "Jellyfin",
+		"description": "Media server",
+		"url":         "https://jellyfin.kube.calebdunn.tech",
+		"icon":        "jellyfin",
+		"gatus_key":   "media_jellyfin",
 	})
 	req, _ := http.NewRequest(http.MethodPost, s.URL+"/api/services", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")

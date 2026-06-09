@@ -47,16 +47,14 @@ func New(d Deps) http.Handler {
 		mux.HandleFunc("DELETE /api/services/{id}", s.handleDeleteService)
 		mux.HandleFunc("POST /api/favorites/{id}", s.handleAddFavorite)
 		mux.HandleFunc("DELETE /api/favorites/{id}", s.handleRemoveFavorite)
+		mux.HandleFunc("PUT /api/layout", s.handleUpdateLayout)
 		mux.HandleFunc("GET /api/status", s.handleStatus)
 		mux.HandleFunc("GET /health", s.handleHealth)
 	} else {
-		for _, p := range []string{"POST /api/register", "POST /api/login", "POST /api/logout", "GET /api/me", "GET /api/services", "POST /api/services", "PATCH /api/services/{id}", "DELETE /api/services/{id}", "POST /api/favorites/{id}", "DELETE /api/favorites/{id}", "GET /api/status", "GET /health"} {
+		for _, p := range []string{"POST /api/register", "POST /api/login", "POST /api/logout", "GET /api/me", "GET /api/services", "POST /api/services", "PATCH /api/services/{id}", "DELETE /api/services/{id}", "POST /api/favorites/{id}", "DELETE /api/favorites/{id}", "PUT /api/layout", "GET /api/status", "GET /health"} {
 			mux.HandleFunc(p, notImplemented)
 		}
 	}
-
-	// Still stubbed — personal sort order (A5) lands in the next slice.
-	mux.HandleFunc("PUT /api/layout", notImplemented)
 
 	mux.HandleFunc("GET /live", handleLive)
 

@@ -66,15 +66,17 @@ func TestMarkFavoritePersistsAcrossSessions(t *testing.T) {
 }
 
 func TestPersonalSortOrderPersistsAcrossSessions(t *testing.T) {
-	t.Skip("personal layout slice not yet implemented — PUT /api/layout is still 501 (next task)")
-
 	s := testsupport.NewServer(t)
 	defer s.Close()
 
-	order := map[string]any{"order": []string{"service-id-3", "service-id-1", "service-id-2"}}
-	b, _ := json.Marshal(order)
+	// The catalog seeds two services (Gitea, Grafana) with generated UUIDs and
+	// defaults to name order. Save the reverse, then prove a fresh session sees it.
+	def := listServices(t, s.URL, "session-one")
+	require.Len(t, def, 2, "expected the two seeded services in default (name) order")
+	reversed := []string{def[1].ID, def[0].ID}
 
-	req1, _ := http.NewRequest(http.MethodPut, s.URL+"/api/layout", bytes.NewReader(b))
+	order, _ := json.Marshal(map[string]any{"order": reversed})
+	req1, _ := http.NewRequest(http.MethodPut, s.URL+"/api/layout", bytes.NewReader(order))
 	req1.Header.Set("Content-Type", "application/json")
 	req1.AddCookie(&http.Cookie{Name: "homepad_session", Value: "session-one"})
 	resp1, err := http.DefaultClient.Do(req1)
@@ -83,22 +85,9 @@ func TestPersonalSortOrderPersistsAcrossSessions(t *testing.T) {
 	require.Equal(t, http.StatusNoContent, resp1.StatusCode,
 		"PUT /api/layout must return 204")
 
-	req2, _ := http.NewRequest(http.MethodGet, s.URL+"/api/services", nil)
-	req2.AddCookie(&http.Cookie{Name: "homepad_session", Value: "session-two"})
-	resp2, err := http.DefaultClient.Do(req2)
-	require.NoError(t, err)
-	defer resp2.Body.Close()
-	require.Equal(t, http.StatusOK, resp2.StatusCode)
-
-	var payload struct {
-		Services []struct {
-			ID string `json:"id"`
-		} `json:"services"`
-	}
-	require.NoError(t, json.NewDecoder(resp2.Body).Decode(&payload))
-	require.Len(t, payload.Services, 3, "expected 3 services back in user's layout order")
-
-	assert.Equal(t, "service-id-3", payload.Services[0].ID, "saved order must persist (position 0)")
-	assert.Equal(t, "service-id-1", payload.Services[1].ID, "saved order must persist (position 1)")
-	assert.Equal(t, "service-id-2", payload.Services[2].ID, "saved order must persist (position 2)")
+	// Session 2 (same user, new login): /api/services honors the saved order.
+	got := listServices(t, s.URL, "session-two")
+	require.Len(t, got, 2, "expected both services back in the user's layout order")
+	assert.Equal(t, reversed[0], got[0].ID, "saved order must persist (position 0)")
+	assert.Equal(t, reversed[1], got[1].ID, "saved order must persist (position 1)")
 }

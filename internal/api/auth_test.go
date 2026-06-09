@@ -18,8 +18,10 @@ func TestRegisterCreatesUser(t *testing.T) {
 	s := testsupport.NewServer(t)
 	defer s.Close()
 
+	// Use an email the fixture does NOT pre-seed — alice is seeded so the login
+	// test can sign in without registering, so registering her would 409.
 	body, _ := json.Marshal(map[string]string{
-		"email":    "alice@example.com",
+		"email":    "newcomer@example.com",
 		"password": "correct horse battery staple",
 	})
 	resp, err := http.Post(s.URL+"/api/register", "application/json", bytes.NewReader(body))
