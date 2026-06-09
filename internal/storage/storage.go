@@ -165,6 +165,78 @@ func (s *Store) CreateService(ctx context.Context, in Service) (Service, error) 
 	return sv, nil
 }
 
+// ServiceUpdate is a partial patch of a catalog entry. A nil field is left
+// unchanged. GatusKey follows intent: nil keeps the current value; a non-nil
+// pointer to "" clears it (unmonitors the service).
+type ServiceUpdate struct {
+	Slug        *string
+	Name        *string
+	Description *string
+	URL         *string
+	Icon        *string
+	GatusKey    *string
+}
+
+// UpdateService applies a partial patch and returns the updated row. Returns
+// ErrNotFound when id names no service (including a malformed UUID) and
+// ErrSlugTaken when the new slug collides with another entry.
+func (s *Store) UpdateService(ctx context.Context, id string, in ServiceUpdate) (Service, error) {
+	setGatus := in.GatusKey != nil
+	var gatusKey *string
+	if setGatus && *in.GatusKey != "" {
+		gatusKey = in.GatusKey
+	}
+
+	var sv Service
+	err := s.pool.QueryRow(ctx,
+		`UPDATE services SET
+		   slug        = COALESCE($2, slug),
+		   name        = COALESCE($3, name),
+		   description = COALESCE($4, description),
+		   url         = COALESCE($5, url),
+		   icon        = COALESCE($6, icon),
+		   gatus_key   = CASE WHEN $7 THEN $8 ELSE gatus_key END,
+		   updated_at  = now()
+		 WHERE id = $1
+		 RETURNING id, slug, name, description, url, icon, COALESCE(gatus_key, '')`,
+		id, in.Slug, in.Name, in.Description, in.URL, in.Icon, setGatus, gatusKey,
+	).Scan(&sv.ID, &sv.Slug, &sv.Name, &sv.Description, &sv.URL, &sv.Icon, &sv.GatusKey)
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		if pgErr.Code == "23505" {
+			return Service{}, ErrSlugTaken
+		}
+		if pgErr.Code == "22P02" { // malformed UUID: no such service
+			return Service{}, ErrNotFound
+		}
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Service{}, ErrNotFound
+	}
+	if err != nil {
+		return Service{}, err
+	}
+	return sv, nil
+}
+
+// DeleteService removes a catalog entry. Returns ErrNotFound when id names no
+// service (including a malformed UUID). Favorites and layout rows referencing it
+// are cleaned up by ON DELETE CASCADE.
+func (s *Store) DeleteService(ctx context.Context, id string) error {
+	tag, err := s.pool.Exec(ctx, `DELETE FROM services WHERE id = $1`, id)
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "22P02" {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // AddFavorite marks serviceID as a favorite for userID. Idempotent: marking an
 // already-favorited service is a no-op. Returns ErrNotFound when serviceID does
 // not name a real service (FK violation or malformed UUID).

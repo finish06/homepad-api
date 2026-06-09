@@ -119,6 +119,88 @@ func (s *server) handleCreateService(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleUpdateService lets an admin edit a catalog entry (A6). Non-admins get
+// 403. Body fields are optional — only those present are changed.
+func (s *server) handleUpdateService(w http.ResponseWriter, r *http.Request) {
+	u, ok := s.currentUser(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if u.Role != "admin" {
+		http.Error(w, "admin role required", http.StatusForbidden)
+		return
+	}
+
+	var in struct {
+		Slug        *string `json:"slug"`
+		Name        *string `json:"name"`
+		Description *string `json:"description"`
+		URL         *string `json:"url"`
+		Icon        *string `json:"icon"`
+		GatusKey    *string `json:"gatus_key"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		return
+	}
+
+	sv, err := s.store.UpdateService(r.Context(), r.PathValue("id"), storage.ServiceUpdate{
+		Slug:        in.Slug,
+		Name:        in.Name,
+		Description: in.Description,
+		URL:         in.URL,
+		Icon:        in.Icon,
+		GatusKey:    in.GatusKey,
+	})
+	if errors.Is(err, storage.ErrNotFound) {
+		http.Error(w, "no such service", http.StatusNotFound)
+		return
+	}
+	if errors.Is(err, storage.ErrSlugTaken) {
+		http.Error(w, "a service with that slug already exists", http.StatusConflict)
+		return
+	}
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, serviceView{
+		ID:          sv.ID,
+		Slug:        sv.Slug,
+		Name:        sv.Name,
+		Description: sv.Description,
+		URL:         sv.URL,
+		Icon:        sv.Icon,
+		Status:      statusFor(s.poller.Snapshot(), sv.GatusKey),
+	})
+}
+
+// handleDeleteService lets an admin remove a catalog entry (A6). Non-admins get 403.
+func (s *server) handleDeleteService(w http.ResponseWriter, r *http.Request) {
+	u, ok := s.currentUser(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if u.Role != "admin" {
+		http.Error(w, "admin role required", http.StatusForbidden)
+		return
+	}
+
+	err := s.store.DeleteService(r.Context(), r.PathValue("id"))
+	if errors.Is(err, storage.ErrNotFound) {
+		http.Error(w, "no such service", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // handleStatus exposes the raw cached Gatus snapshot for the frontend's
 // staleness display (A4). Keys are Gatus endpoint keys, never the Gatus URL (A11).
 func (s *server) handleStatus(w http.ResponseWriter, r *http.Request) {
