@@ -175,3 +175,7 @@ Frontend (`Code/homepad` repo — not yet started):
   wiring). I own app code; you own the K8s deploy manifests.
 
 No open blockers. Backend is alpha-complete and green.
+
+## Merge record — 2026-06-10
+
+- PR #1 `feat/catalog-vertical-slice` → `main` **merged** via real merge commit `04eb7d2` (parents `17725ebe06` + `69ac38a842`). CI run #561 (Backend vet/build/tests, pull_request) concluded **success**; mergeable was true. Source branch deleted. — Stitch
