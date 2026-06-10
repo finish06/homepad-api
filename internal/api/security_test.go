@@ -19,7 +19,7 @@ import (
 const sentinelGatusURL = "http://gatus.10.17.2.213.nip.io"
 
 func TestNoGatusURLInAnyResponse(t *testing.T) {
-	s := testsupport.NewServer()
+	s := testsupport.NewServer(t)
 	defer s.Close()
 
 	endpoints := []string{

@@ -15,7 +15,7 @@ import (
 // and /api/services never returns 5xx.
 
 func TestServicesEndpoint_GatusBlackhole_NoFiveXX(t *testing.T) {
-	s := testsupport.NewServer()
+	s := testsupport.NewServer(t)
 	defer s.Close()
 
 	req, _ := http.NewRequest(http.MethodGet, s.URL+"/api/services", nil)
@@ -31,7 +31,7 @@ func TestServicesEndpoint_GatusBlackhole_NoFiveXX(t *testing.T) {
 func TestServicesEndpoint_GatusBlackhole_AllUnknown(t *testing.T) {
 	// GREEN phase will wire a blackhole Gatus URL and seed catalog entries
 	// with gatus_key set. Test then asserts every entry's status field is "UNKNOWN".
-	s := testsupport.NewServer()
+	s := testsupport.NewServer(t)
 	defer s.Close()
 
 	req, _ := http.NewRequest(http.MethodGet, s.URL+"/api/services", nil)
