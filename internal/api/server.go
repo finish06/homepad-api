@@ -2,19 +2,26 @@ package api
 
 import (
 	"net/http"
+	"time"
 
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/gatus"
+	"gitea.kube.calebdunn.tech/code/homepad-api/internal/oidc"
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/session"
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/storage"
 )
 
 const sessionCookie = "homepad_session"
 
+// oidcPendingTTL bounds how long a login may sit between the authorize redirect
+// and the callback.
+const oidcPendingTTL = 10 * time.Minute
+
 type Deps struct {
 	Store        *storage.Store
 	Poller       *gatus.Poller
 	Sessions     *session.Manager
 	Registration string
+	OIDC         oidc.Config
 }
 
 type server struct {
@@ -22,6 +29,9 @@ type server struct {
 	poller       *gatus.Poller
 	sessions     *session.Manager
 	registration string
+	oidc         oidc.Config
+	provider     *oidc.Provider
+	pending      *oidc.Pending
 }
 
 func New(d Deps) http.Handler {
@@ -30,6 +40,7 @@ func New(d Deps) http.Handler {
 		poller:       d.Poller,
 		sessions:     d.Sessions,
 		registration: d.Registration,
+		oidc:         d.OIDC,
 	}
 
 	mux := http.NewServeMux()
@@ -50,6 +61,18 @@ func New(d Deps) http.Handler {
 		mux.HandleFunc("PUT /api/layout", s.handleUpdateLayout)
 		mux.HandleFunc("GET /api/status", s.handleStatus)
 		mux.HandleFunc("GET /health", s.handleHealth)
+
+		// OIDC config is always advertised so the web client can gate its
+		// "Log in with PocketID" button. The login/callback endpoints exist
+		// only when OIDC is enabled — otherwise they stay unregistered (404)
+		// and homepad behaves as a local-accounts-only app.
+		mux.HandleFunc("GET /api/auth/config", s.handleOIDCConfig)
+		if d.OIDC.Enabled {
+			s.provider = oidc.NewProvider(d.OIDC)
+			s.pending = oidc.NewPending(oidcPendingTTL)
+			mux.HandleFunc("GET /api/auth/oidc/login", s.handleOIDCLogin)
+			mux.HandleFunc("GET /api/auth/oidc/callback", s.handleOIDCCallback)
+		}
 	} else {
 		for _, p := range []string{"POST /api/register", "POST /api/login", "POST /api/logout", "GET /api/me", "GET /api/services", "POST /api/services", "PATCH /api/services/{id}", "DELETE /api/services/{id}", "POST /api/favorites/{id}", "DELETE /api/favorites/{id}", "PUT /api/layout", "GET /api/status", "GET /health"} {
 			mux.HandleFunc(p, notImplemented)

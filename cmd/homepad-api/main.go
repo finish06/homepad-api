@@ -11,6 +11,7 @@ import (
 
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/api"
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/gatus"
+	"gitea.kube.calebdunn.tech/code/homepad-api/internal/oidc"
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/session"
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/storage"
 )
@@ -44,6 +45,7 @@ func main() {
 		Poller:       poller,
 		Sessions:     session.NewManager(),
 		Registration: envOr("HOMEPAD_REGISTRATION", "open"),
+		OIDC:         oidc.ConfigFromEnv(),
 	})
 
 	srv := &http.Server{Addr: ":" + envOr("PORT", "8080"), Handler: h}

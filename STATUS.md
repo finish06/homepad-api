@@ -3,6 +3,58 @@
 > NATS result reports are being lost to a harness bug, so this file is how I
 > talk to you, Joe. Updated + pushed every run. Newest run on top.
 
+## This run (2026-06-10) — PocketID / OIDC login (backend) ✅ ADDITIVE, tests green on the test DB
+
+New requirement: log in with PocketID (homelab OIDC), **additive** — local
+email+password login is untouched and still works. This run is the foundational
+backend slice: the full Authorization-Code-with-PKCE login + callback, account
+linking, and admin-group mapping, all proven against a **mocked IdP + the real
+test Postgres**. Web button is the next run.
+
+**New `internal/oidc` package (no new deps — stdlib crypto):**
+- `ConfigFromEnv` reads every value you wire at deploy: `OIDC_ENABLED`,
+  `OIDC_DISCOVERY_URL` (or `OIDC_ISSUER`), `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`,
+  `OIDC_REDIRECT_URL`, `OIDC_ADMIN_GROUP`. Nothing hardcoded.
+- `Provider`: lazy discovery (cached), `AuthCodeURL` (PKCE S256 + state + nonce),
+  `Exchange` (code→tokens with the verifier), `Userinfo` (fallback only).
+- `verify.go`: ID-token validation hand-rolled on stdlib — RS256 signature
+  against the discovery `jwks_uri`, then `iss` / `aud` / `exp` / `nonce`. JWKS
+  cached, refreshed once on unknown `kid` (key rotation).
+- `Pending`: in-memory state→{verifier,nonce} store, 10-min TTL, single-use
+  (mirrors the existing in-memory session.Manager; single-replica is fine).
+
+**New endpoints (only registered when `OIDC_ENABLED=true`):**
+- `GET /api/auth/oidc/login` → 302 to PocketID authorize (PKCE/state/nonce
+  stashed server-side by state).
+- `GET /api/auth/oidc/callback` → validate state, exchange code, verify ID token,
+  resolve user, set the **same `homepad_session` cookie** local login uses, 302
+  to `/`. Rest of the app is unchanged.
+- `GET /api/auth/config` → `{"oidcEnabled":bool}` (always present, so the web can
+  gate the button). When `OIDC_ENABLED=false` the two oidc endpoints are
+  unregistered → 404, and homepad is local-only.
+
+**Account linking BY EMAIL:** existing local row with that email → reused as-is
+(role preserved, password hash never touched). No row → created; role = `admin`
+iff the user's `groups` claim contains `OIDC_ADMIN_GROUP`, else `user`.
+OIDC-provisioned rows store a non-bcrypt sentinel in `password_hash`, so they can
+never local-login (no schema/migration change — fully additive).
+
+**Tests (test-first, all green on the test DB):** a self-contained mock IdP
+(httptest serving discovery + JWKS + authorize + token + userinfo, self-signed
+RSA key) drives the real browser round-trip incl. PKCE verification end-to-end:
+- admin-from-group creates an admin · regular user when not in the group ·
+  link-by-email reuses the existing row (no dup, role preserved) · disabled →
+  404 + config reports false · enabled → config reports true.
+- `go test ./... -count=1` green; `go vet ./...` clean. Existing suite unchanged.
+
+**NEEDS JOE:** the real **`OIDC_ADMIN_GROUP`** value (PocketID group name) — I
+read it from env, so just set it at deploy; tests use a placeholder
+`homepad-admins`. Also the real client id/secret/redirect/issuer at deploy time.
+
+_Follow-ups (not blockers): negative-path unit tests for verify (bad sig / wrong
+nonce) — happy path is covered by the integration test; web "Log in with
+PocketID" button + config gate is next run._
+
 ## This run (2026-06-09) — A5 layout slice ✅ + WHOLE SUITE GREEN ON REAL POSTGRES ✅
 
 Two things this run: (1) finished the **A5 layout** slice — the last 501 stub is

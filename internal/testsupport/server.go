@@ -12,9 +12,48 @@ import (
 
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/api"
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/gatus"
+	"gitea.kube.calebdunn.tech/code/homepad-api/internal/oidc"
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/session"
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/storage"
 )
+
+// NewOIDCServer returns a homepad-api server wired with the given OIDC config,
+// backed by a freshly-truncated test Postgres, plus the Store so tests can seed
+// and inspect users directly. It is the OIDC-flow counterpart to NewServer:
+// no fixtures are seeded, leaving the user table for the test to control.
+// Skipped when DATABASE_URL is unset. Cleanup is registered on t.
+func NewOIDCServer(t *testing.T, cfg oidc.Config) (*httptest.Server, *storage.Store) {
+	t.Helper()
+
+	dsn := os.Getenv("DATABASE_URL")
+	if dsn == "" {
+		t.Skip("DATABASE_URL not set — skipping integration test (needs Postgres)")
+	}
+
+	ctx := context.Background()
+	store, err := storage.Open(ctx, dsn)
+	if err != nil {
+		t.Fatalf("storage.Open: %v", err)
+	}
+	t.Cleanup(func() { store.Close() })
+
+	if err := store.Migrate(ctx); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	truncate(t, ctx, dsn)
+
+	poller := gatus.NewPoller(gatus.NewClient("http://127.0.0.1:1"), time.Hour)
+	h := api.New(api.Deps{
+		Store:        store,
+		Poller:       poller,
+		Sessions:     session.NewManager(),
+		Registration: "open",
+		OIDC:         cfg,
+	})
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+	return srv, store
+}
 
 // NewServer returns an httptest.Server running the real homepad-api handler
 // backed by a live Postgres (DATABASE_URL). Each call starts from a truncated
