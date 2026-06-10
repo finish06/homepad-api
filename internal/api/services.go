@@ -19,6 +19,8 @@ type serviceView struct {
 	Icon        string `json:"icon"`
 	Status      string `json:"status"`
 	Favorite    bool   `json:"favorite"`
+	IconLight   bool   `json:"iconLight"`
+	IconDark    bool   `json:"iconDark"`
 }
 
 // handleListServices serves the shared catalog with a live status badge per
@@ -41,6 +43,11 @@ func (s *server) handleListServices(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+	icons, err := s.store.AllIconFlags(r.Context())
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
 
 	snap := s.poller.Snapshot()
 	out := make([]serviceView, 0, len(svcs))
@@ -54,6 +61,8 @@ func (s *server) handleListServices(w http.ResponseWriter, r *http.Request) {
 			Icon:        sv.Icon,
 			Status:      statusFor(snap, sv.GatusKey),
 			Favorite:    favs[sv.ID],
+			IconLight:   icons[sv.ID].Light,
+			IconDark:    icons[sv.ID].Dark,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"services": out})

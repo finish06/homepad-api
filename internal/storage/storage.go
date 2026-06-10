@@ -259,6 +259,104 @@ func (s *Store) DeleteService(ctx context.Context, id string) error {
 	return nil
 }
 
+// Icon is an uploaded PNG variant for a service, with the metadata needed to
+// serve it conditionally (ETag) without re-hashing.
+type Icon struct {
+	Bytes []byte
+	ETag  string
+}
+
+// IconFlags reports, for every service that has at least one uploaded icon,
+// which variants exist. Services with no uploads are absent from the map. It
+// reads only the (service_id, variant) keys — never the blob bytes — so the
+// catalog list query stays cheap (spec A13).
+type IconFlags struct {
+	Light bool
+	Dark  bool
+}
+
+// AllIconFlags returns the icon-variant presence map keyed by service id. Used
+// to populate iconLight/iconDark on the catalog list without pulling bytes.
+func (s *Store) AllIconFlags(ctx context.Context) (map[string]IconFlags, error) {
+	rows, err := s.pool.Query(ctx, `SELECT service_id, variant FROM service_icons`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make(map[string]IconFlags)
+	for rows.Next() {
+		var id, variant string
+		if err := rows.Scan(&id, &variant); err != nil {
+			return nil, err
+		}
+		f := out[id]
+		switch variant {
+		case "light":
+			f.Light = true
+		case "dark":
+			f.Dark = true
+		}
+		out[id] = f
+	}
+	return out, rows.Err()
+}
+
+// GetIcon returns the stored PNG bytes and ETag for a service's variant.
+// Returns ErrNotFound when that variant has no upload (or id is a malformed
+// UUID — the serving handler treats both as 404).
+func (s *Store) GetIcon(ctx context.Context, serviceID, variant string) (Icon, error) {
+	var ic Icon
+	err := s.pool.QueryRow(ctx,
+		`SELECT bytes, etag FROM service_icons WHERE service_id = $1 AND variant = $2`,
+		serviceID, variant,
+	).Scan(&ic.Bytes, &ic.ETag)
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "22P02" { // malformed UUID
+		return Icon{}, ErrNotFound
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Icon{}, ErrNotFound
+	}
+	if err != nil {
+		return Icon{}, err
+	}
+	return ic, nil
+}
+
+// PutIcon upserts a service's icon variant — the same idempotent operation
+// handles both first upload and replace (PK is (service_id, variant)). Returns
+// ErrNotFound when serviceID does not name a real service (FK violation or
+// malformed UUID).
+func (s *Store) PutIcon(ctx context.Context, serviceID, variant string, bytes []byte, width, height int, etag string) error {
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO service_icons (service_id, variant, bytes, byte_size, width, height, etag, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+		 ON CONFLICT (service_id, variant) DO UPDATE SET
+		   bytes = EXCLUDED.bytes, byte_size = EXCLUDED.byte_size,
+		   width = EXCLUDED.width, height = EXCLUDED.height,
+		   etag = EXCLUDED.etag, updated_at = now()`,
+		serviceID, variant, bytes, len(bytes), width, height, etag)
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && (pgErr.Code == "23503" || pgErr.Code == "22P02") {
+		return ErrNotFound
+	}
+	return err
+}
+
+// DeleteIcon removes a service's icon variant. Idempotent: deleting a variant
+// that isn't set (or a malformed id) succeeds with no effect (spec A11).
+func (s *Store) DeleteIcon(ctx context.Context, serviceID, variant string) error {
+	_, err := s.pool.Exec(ctx,
+		`DELETE FROM service_icons WHERE service_id = $1 AND variant = $2`,
+		serviceID, variant)
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "22P02" { // malformed UUID: nothing to delete
+		return nil
+	}
+	return err
+}
+
 // AddFavorite marks serviceID as a favorite for userID. Idempotent: marking an
 // already-favorited service is a no-op. Returns ErrNotFound when serviceID does
 // not name a real service (FK violation or malformed UUID).

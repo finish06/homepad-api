@@ -3,6 +3,50 @@
 > NATS result reports are being lost to a harness bug, so this file is how I
 > talk to you, Joe. Updated + pushed every run. Newest run on top.
 
+## This run (2026-06-10) — v2 app-icons BACKEND slice ✅ test-first, all green on the test DB
+
+Branch `feat/app-icons` off freshly-merged `main`. First v2 increment: the whole
+**backend** for custom per-service PNG icons (light/dark), backend-first so the
+web edit-mode UI lands next run against real endpoints. Drove it RED→GREEN
+against the test Postgres. Decisions Joe signed off (Q1–Q4): fold-in edit mode,
+keep 512×512 / 256 KB caps, **reject** oversized (not downscale), **PNG-only**.
+
+**Migration `0002_app_icons` (additive, up + down):** new `service_icons` table
+— `(service_id, variant)` PK, `bytes BYTEA`, `byte_size/width/height`, hex
+SHA-256 `etag`, `ON DELETE CASCADE` off `services`. `services.icon` text and the
+39 seeded rows are **untouched** (zero data migration). Down drops the table for
+a clean revert to v1 icon behavior.
+
+**Storage (`internal/storage`):** `Icon` type + `AllIconFlags` (presence map,
+never bytes — keeps the list query cheap), `GetIcon`, `PutIcon` (upsert =
+create-or-replace), `DeleteIcon` (idempotent). Malformed-UUID / FK-violation →
+`ErrNotFound`, matching the existing service-CRUD error mapping.
+
+**4 handlers (`internal/api/icons.go`) + routes:**
+- `GET  /api/services/{id}/icon/{variant}` — session-gated; `image/png` + quoted
+  `ETag` + `Cache-Control: private, max-age=300`; `If-None-Match` → **304**; 404
+  when absent.
+- `PUT  …/icon/{variant}` — **admin-only (403)**; raw PNG body; validation order
+  **size → magic-byte sniff → dimensions**: >256 KB → **413**, non-PNG (even
+  with spoofed `Content-Type: image/png`) → **415**, outside 16–512 px → **422**,
+  valid → **204** (upsert).
+- `DELETE …/icon/{variant}` — **admin-only**; idempotent **204**.
+- bad `{variant}` (not light/dark) → **400** on every verb.
+
+**List response:** `GET /api/services` now carries `iconLight`/`iconDark`
+booleans per entry; blob bytes are **never** in the list.
+
+**Tests (`internal/api/icons_test.go`):** new integration coverage for A3, A4,
+A5, A6 (incl. boundary cases + bad-variant 400), A10, A11, A12 (cascade verified
+by a direct `service_icons` row count), A13. **Full suite green** on the test DB,
+`go vet` + `gofmt` clean, `go build ./...` clean. v1's A1–A11 suite still passes
+unchanged. CI runs the same `go test` on push.
+
+**Next run:** the web `feat/app-icons` slice — edit-mode toggle (admin-only,
+folds in v1 add/edit/delete per Q1), per-tile light/dark upload+remove controls,
+theme-aware tile rendering via the precedence chain, and the bundled local
+default + `<img> onError` that fixes today's broken-image placeholders.
+
 ## This run (2026-06-10) — README tidy (docs only, no code)
 
 Refreshed this repo's README to match reality: replaced the stale "scaffold /

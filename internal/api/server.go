@@ -56,6 +56,9 @@ func New(d Deps) http.Handler {
 		mux.HandleFunc("POST /api/services", s.handleCreateService)
 		mux.HandleFunc("PATCH /api/services/{id}", s.handleUpdateService)
 		mux.HandleFunc("DELETE /api/services/{id}", s.handleDeleteService)
+		mux.HandleFunc("GET /api/services/{id}/icon/{variant}", s.handleGetIcon)
+		mux.HandleFunc("PUT /api/services/{id}/icon/{variant}", s.handlePutIcon)
+		mux.HandleFunc("DELETE /api/services/{id}/icon/{variant}", s.handleDeleteIcon)
 		mux.HandleFunc("POST /api/favorites/{id}", s.handleAddFavorite)
 		mux.HandleFunc("DELETE /api/favorites/{id}", s.handleRemoveFavorite)
 		mux.HandleFunc("PUT /api/layout", s.handleUpdateLayout)
@@ -74,7 +77,7 @@ func New(d Deps) http.Handler {
 			mux.HandleFunc("GET /api/auth/oidc/callback", s.handleOIDCCallback)
 		}
 	} else {
-		for _, p := range []string{"POST /api/register", "POST /api/login", "POST /api/logout", "GET /api/me", "GET /api/services", "POST /api/services", "PATCH /api/services/{id}", "DELETE /api/services/{id}", "POST /api/favorites/{id}", "DELETE /api/favorites/{id}", "PUT /api/layout", "GET /api/status", "GET /health"} {
+		for _, p := range []string{"POST /api/register", "POST /api/login", "POST /api/logout", "GET /api/me", "GET /api/services", "POST /api/services", "PATCH /api/services/{id}", "DELETE /api/services/{id}", "GET /api/services/{id}/icon/{variant}", "PUT /api/services/{id}/icon/{variant}", "DELETE /api/services/{id}/icon/{variant}", "POST /api/favorites/{id}", "DELETE /api/favorites/{id}", "PUT /api/layout", "GET /api/status", "GET /health"} {
 			mux.HandleFunc(p, notImplemented)
 		}
 	}
