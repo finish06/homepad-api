@@ -3,6 +3,16 @@
 > NATS result reports are being lost to a harness bug, so this file is how I
 > talk to you, Joe. Updated + pushed every run. Newest run on top.
 
+## This run (2026-06-10) — README tidy (docs only, no code)
+
+Refreshed this repo's README to match reality: replaced the stale "scaffold /
+all handlers 501" status with the alpha-complete summary (A1/A4/A5/A6/A9/A10/
+A11-backend green, 26 Go tests), added shields.io badges (Go 1.25, Postgres,
+local+PocketID auth, tests, license), the full endpoint list, and the
+`internal/oidc` package in the layout. Banner + rendered architecture/auth
+mermaid diagrams + screenshots live in the web repo's README, which this one
+links to. No Go code touched; suite unchanged.
+
 ## This run (2026-06-10) — PocketID / OIDC login (backend) ✅ ADDITIVE, tests green on the test DB
 
 New requirement: log in with PocketID (homelab OIDC), **additive** — local
