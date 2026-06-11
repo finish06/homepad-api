@@ -5,6 +5,9 @@
 
 ## This run (2026-06-11) — v3 theme-mode BACKEND slice ✅ test-first, all green on the test DB
 
+**PR #5 (open, mergeable, base `main`):** https://gitea.kube.calebdunn.tech/Code/homepad-api/pulls/5 — **CI green** (Backend vet/build/tests, push + pull_request). Left open for review, not merged. 7 files, +282/−11.
+
+
 Joe approved the v3 decisions (Q1 control=header user-menu, Q2 endpoint=`PATCH
 /api/me`, Q3 persistence=per-user Postgres + localStorage first-paint cache —
 see `Code/homepad/specs/DECISIONS.md`). This run is the **backend slice only**,
