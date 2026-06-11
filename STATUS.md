@@ -223,3 +223,24 @@ No open blockers. Backend is alpha-complete and green.
 ## Merge record — 2026-06-10
 
 - PR #1 `feat/catalog-vertical-slice` → `main` **merged** via real merge commit `04eb7d2` (parents `17725ebe06` + `69ac38a842`). CI run #561 (Backend vet/build/tests, pull_request) concluded **success**; mergeable was true. Source branch deleted. — Stitch
+
+## Coverage review — 2026-06-10 (v1 + v2)
+
+Cross-repo AC + coverage review lives in `Code/homepad`'s
+`docs/coverage-v1-v2.md`. Backend-relevant findings:
+
+- **Measured:** `go test ./...` against `homepad-testdb.stitch.svc` = **36 pass,
+  66.7% total stmts** (`-coverpkg=./...`). Per-pkg self-cover: `api` 65.7%,
+  `gatus` 58.1%, `storage` 11.9%* (*exercised via `api` integration tests).
+- 🔴 **Merge-state flag:** the **v2 slice (migration `0002`, icon handlers,
+  `iconLight/iconDark` flags) + the OIDC work are NOT on `main`** — `origin/main`
+  is `fcef7fa` (v1 only); it all sits on `feat/app-icons` (`382c892`). Needs a PR
+  merge before v2 is real on the backend.
+- ✅ All v2 icon ACs (A3–A6, A10–A14 server-side) pass **on `feat/app-icons`**.
+- 🟡 Untested (none are v1/v2 ACs): OIDC failure branches
+  (`ConfigFromEnv`/`Userinfo`/`truthy` 0%, `handleOIDCCallback` 45%),
+  `gatus.FetchAll` success-parse 23.8%, `0002_app_icons.down.sql` rollback.
+- **Closed during review (test-only, green):** `TestLogoutClearsSession` →
+  full A1 round-trip (`session.Destroy` 0%→100%);
+  `TestRemoveFavoritePersistsAcrossSessions` added (`DELETE /api/favorites`
+  was 0%).

@@ -90,11 +90,44 @@ func TestLogoutClearsSession(t *testing.T) {
 	s := testsupport.NewServer(t)
 	defer s.Close()
 
+	// Full AC A1 round-trip: log in → /api/me 200 → logout (with cookie) →
+	// /api/me 401. The cookie-carrying logout exercises server-side session
+	// destruction, not just the 204 status.
+	body, _ := json.Marshal(map[string]string{
+		"email":    "alice@example.com",
+		"password": "correct horse battery staple",
+	})
+	loginResp, err := http.Post(s.URL+"/api/login", "application/json", bytes.NewReader(body))
+	require.NoError(t, err)
+	loginResp.Body.Close()
+	var sess *http.Cookie
+	for _, c := range loginResp.Cookies() {
+		if c.Name == "homepad_session" {
+			sess = c
+		}
+	}
+	require.NotNil(t, sess, "login must set a session cookie")
+
+	meReq, _ := http.NewRequest(http.MethodGet, s.URL+"/api/me", nil)
+	meReq.AddCookie(sess)
+	meResp, err := http.DefaultClient.Do(meReq)
+	require.NoError(t, err)
+	meResp.Body.Close()
+	require.Equal(t, http.StatusOK, meResp.StatusCode, "GET /api/me before logout must be 200")
+
 	req, _ := http.NewRequest(http.MethodPost, s.URL+"/api/logout", nil)
+	req.AddCookie(sess)
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
 	defer resp.Body.Close()
-
 	assert.Equal(t, http.StatusNoContent, resp.StatusCode,
 		"POST /api/logout must return 204 No Content")
+
+	after, _ := http.NewRequest(http.MethodGet, s.URL+"/api/me", nil)
+	after.AddCookie(sess)
+	afterResp, err := http.DefaultClient.Do(after)
+	require.NoError(t, err)
+	defer afterResp.Body.Close()
+	assert.Equal(t, http.StatusUnauthorized, afterResp.StatusCode,
+		"GET /api/me after logout must be 401 (session destroyed)")
 }

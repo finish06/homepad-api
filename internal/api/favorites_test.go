@@ -91,3 +91,37 @@ func TestPersonalSortOrderPersistsAcrossSessions(t *testing.T) {
 	assert.Equal(t, reversed[0], got[0].ID, "saved order must persist (position 0)")
 	assert.Equal(t, reversed[1], got[1].ID, "saved order must persist (position 1)")
 }
+
+// AC A5 (cont.) — un-favoriting via DELETE clears the star and persists across
+// sessions. Closes the coverage gap on handleRemoveFavorite / storage.RemoveFavorite.
+func TestRemoveFavoritePersistsAcrossSessions(t *testing.T) {
+	s := testsupport.NewServer(t)
+	defer s.Close()
+
+	svcs := listServices(t, s.URL, "session-one")
+	require.NotEmpty(t, svcs, "expected seeded services in the catalog")
+	target := svcs[0].ID
+
+	// Mark, then remove the favorite (same idempotent verb pattern as the UI).
+	mark, _ := http.NewRequest(http.MethodPost, s.URL+"/api/favorites/"+target, nil)
+	mark.AddCookie(&http.Cookie{Name: "homepad_session", Value: "session-one"})
+	mresp, err := http.DefaultClient.Do(mark)
+	require.NoError(t, err)
+	mresp.Body.Close()
+	require.Equal(t, http.StatusNoContent, mresp.StatusCode)
+
+	del, _ := http.NewRequest(http.MethodDelete, s.URL+"/api/favorites/"+target, nil)
+	del.AddCookie(&http.Cookie{Name: "homepad_session", Value: "session-one"})
+	dresp, err := http.DefaultClient.Do(del)
+	require.NoError(t, err)
+	defer dresp.Body.Close()
+	require.Equal(t, http.StatusNoContent, dresp.StatusCode,
+		"DELETE /api/favorites/{id} must return 204")
+
+	// Fresh session (same user): the favorite is gone.
+	for _, svc := range listServices(t, s.URL, "session-two") {
+		if svc.ID == target {
+			assert.False(t, svc.Favorite, "favorite must be cleared after DELETE")
+		}
+	}
+}
