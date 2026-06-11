@@ -121,7 +121,7 @@ func truncate(t *testing.T, ctx context.Context, dsn string) {
 	}
 	defer conn.Close(ctx)
 	if _, err := conn.Exec(ctx,
-		`TRUNCATE user_layout, favorites, services, users RESTART IDENTITY CASCADE`); err != nil {
+		`TRUNCATE user_layout, favorites, services, categories, users RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 }

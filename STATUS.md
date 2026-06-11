@@ -3,6 +3,76 @@
 > NATS result reports are being lost to a harness bug, so this file is how I
 > talk to you, Joe. Updated + pushed every run. Newest run on top.
 
+## This run (2026-06-11) — v4 app-categories BACKEND slice ✅ test-first, all green on the test DB
+
+Joe approved the v4 decisions (Q1 start-fresh / zero seed, Q2 no per-category
+icon, Q3 favorites in both + "Uncategorized" copy, Q4 one category per app — see
+`Code/homepad/specs/DECISIONS.md`). This run is the **backend slice only**,
+test-first per `specs/v4-app-categories.md`; the web grouped-catalog render
+(Favorites first, Uncategorized last) is the **next** increment, not this one.
+
+**Branch:** `feat/v4-categories` → base **`main`**.
+
+**Migration `0004_categories` (additive, up + down):** new `categories`
+(`id UUID`, `name TEXT NOT NULL UNIQUE`, `sort_index INTEGER NOT NULL`,
+`created_at`) + a **nullable** `services.category_id UUID REFERENCES
+categories(id) ON DELETE SET NULL` + `services_by_category_idx`. **Zero seed,
+fully additive** — every existing/seeded app reads back `category_id IS NULL`
+(Uncategorized) and nothing else changes; the Gatus-group head-start is Joe's
+separate seed step, deliberately **not** in this migration (Q1). Down drops the
+index → column → table for a clean revert to v1's flat catalog. **A12 verified
+directly against the test DB**: down→up inside a rolled-back tx drops then
+re-adds `services.category_id` cleanly.
+
+**Storage (`internal/storage`):** new `Category` type + `categories.go`
+(`ListCategories` in sort order, `CreateCategory` appends at `max+1`,
+`RenameCategory`, `SetCategoryOrder` whole-array reindex in one tx,
+`DeleteCategory` idempotent). `Service` gains `CategoryID`/`CategoryName`
+(denormalized via `LEFT JOIN categories`); `ListServices` + `UpdateService`
+select them. `UpdateService` gains three-state category assignment
+(`SetCategory`/`CategoryID`: absent=unchanged, nil=clear, id=assign) and
+validates an unknown/malformed id up front → new `ErrCategoryNotFound` (distinct
+from the service's own 404). New `ErrNameTaken` for the UNIQUE collision.
+
+**API (`internal/api/categories.go` + routes + extended `PATCH /api/services`):**
+- `GET /api/categories` — session-gated; returns `{categories:[{id,name,sortIndex}]}`
+  in admin sort order (starts empty).
+- `POST /api/categories` — **admin-only (403)**; **409** on duplicate name;
+  appended last; **201** with the new category.
+- `PATCH /api/categories/{id}` — **admin-only**; **404** unknown id; **409** dup
+  name; **200** renamed.
+- `PUT /api/categories/order` — **admin-only**; whole-array reorder (same
+  contract as `PUT /api/layout`); **204**.
+- `DELETE /api/categories/{id}` — **admin-only**; idempotent **204**; FK
+  `SET NULL` drops the category's apps to Uncategorized — **no service deleted**.
+- `PATCH /api/services/{id}` extended with optional `categoryId` (three-state via
+  an `optionalString` JSON shim): set/clear; an id naming no category → **400**,
+  service unchanged.
+- `GET /api/services` now carries `categoryId`/`categoryName` per tile (null when
+  Uncategorized) — additive, older clients ignore them.
+
+**Tests (test-first, RED→GREEN):** `internal/api/categories_test.go` (A1–A8:
+create+dup-409, non-admin-403 on every mutating verb incl. assign, rename
+409/404, reorder, assign+clear with denormalized `categoryName`, unknown-cat
+400-unchanged, delete-unassigns-idempotent, list carries fields) +
+`internal/storage/categories_test.go` (model-level: append order, dup name,
+rename, reorder, delete-SET-NULL, three-state update, unknown/malformed cat).
+**Full suite green** on `homepad-testdb.stitch.svc`, `go vet` + `go build`
+clean. v1–v3 ACs still pass unchanged.
+
+**⚠️ Test-runner note — supersedes the 2026-06-09 "no `-p 1` needed" note
+below.** That note was about the *migration* race (advisory lock — still in
+place, still correct for multi-replica boot). v4 adds the **first storage tests
+that write rows and then assert they persist** (duplicate-name collision,
+reorder, delete-SET-NULL). The api test binary's `truncate` now wipes
+`categories`/`services` wholesale (it must — api tests reuse fixed names like
+"Media" and rely on per-test truncation for isolation from *each other*), so
+running the api + storage package binaries concurrently lets api's truncate
+delete the storage tests' rows mid-test — a **data** race the advisory lock
+can't touch. Fix: CI + `make test`/`test-integration` now run `go test ./...
+-count=1 -p 1`, serializing the integration package binaries. Suite is ~6s, so
+the cost is negligible.
+
 ## This run (2026-06-11) — v3 theme-mode BACKEND slice ✅ test-first, all green on the test DB
 
 **PR #5 (open, mergeable, base `main`):** https://gitea.kube.calebdunn.tech/Code/homepad-api/pulls/5 — **CI green** (Backend vet/build/tests, push + pull_request). Left open for review, not merged. 7 files, +282/−11.

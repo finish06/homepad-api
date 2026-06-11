@@ -23,6 +23,15 @@ var ErrEmailTaken = errors.New("storage: email already registered")
 // ErrSlugTaken is returned by CreateService when the slug is already in use.
 var ErrSlugTaken = errors.New("storage: service slug already in use")
 
+// ErrNameTaken is returned by category create/rename when the name collides
+// with an existing category (names are UNIQUE).
+var ErrNameTaken = errors.New("storage: category name already in use")
+
+// ErrCategoryNotFound is returned by UpdateService when an assignment names a
+// category that does not exist (so the handler can answer 400, distinct from a
+// missing service's 404).
+var ErrCategoryNotFound = errors.New("storage: category not found")
+
 type Store struct {
 	DSN  string
 	pool *pgxpool.Pool
@@ -37,14 +46,26 @@ type User struct {
 }
 
 // Service is a catalog entry. GatusKey is empty when the service is unmonitored.
+// CategoryID/CategoryName are nil when the service is Uncategorized (v4);
+// CategoryName is denormalized from the joined category for render convenience.
 type Service struct {
-	ID          string
-	Slug        string
-	Name        string
-	Description string
-	URL         string
-	Icon        string
-	GatusKey    string
+	ID           string
+	Slug         string
+	Name         string
+	Description  string
+	URL          string
+	Icon         string
+	GatusKey     string
+	CategoryID   *string
+	CategoryName *string
+}
+
+// Category is an admin-curated catalog section (v4). Ordering is the explicit
+// admin-controlled SortIndex, not alphabetical.
+type Category struct {
+	ID        string
+	Name      string
+	SortIndex int
 }
 
 func Open(ctx context.Context, dsn string) (*Store, error) {
@@ -160,9 +181,11 @@ func (s *Store) SetThemePref(ctx context.Context, userID, pref string) error {
 // any not yet placed fall back to name order after them.
 func (s *Store) ListServices(ctx context.Context, userID string) ([]Service, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT s.id, s.slug, s.name, s.description, s.url, s.icon, COALESCE(s.gatus_key, '')
+		`SELECT s.id, s.slug, s.name, s.description, s.url, s.icon, COALESCE(s.gatus_key, ''),
+		        s.category_id, c.name
 		   FROM services s
 		   LEFT JOIN user_layout ul ON ul.service_id = s.id AND ul.user_id = $1
+		   LEFT JOIN categories c   ON c.id = s.category_id
 		  ORDER BY ul.sort_index NULLS LAST, s.name`, userID)
 	if err != nil {
 		return nil, err
@@ -172,7 +195,8 @@ func (s *Store) ListServices(ctx context.Context, userID string) ([]Service, err
 	var out []Service
 	for rows.Next() {
 		var sv Service
-		if err := rows.Scan(&sv.ID, &sv.Slug, &sv.Name, &sv.Description, &sv.URL, &sv.Icon, &sv.GatusKey); err != nil {
+		if err := rows.Scan(&sv.ID, &sv.Slug, &sv.Name, &sv.Description, &sv.URL, &sv.Icon, &sv.GatusKey,
+			&sv.CategoryID, &sv.CategoryName); err != nil {
 			return nil, err
 		}
 		out = append(out, sv)
@@ -213,6 +237,11 @@ type ServiceUpdate struct {
 	URL         *string
 	Icon        *string
 	GatusKey    *string
+	// Category is three-state (v4): SetCategory false leaves the assignment
+	// unchanged; SetCategory true with CategoryID nil clears it to NULL
+	// (Uncategorized); SetCategory true with a non-nil id assigns that category.
+	SetCategory bool
+	CategoryID  *string
 }
 
 // UpdateService applies a partial patch and returns the updated row. Returns
@@ -225,20 +254,38 @@ func (s *Store) UpdateService(ctx context.Context, id string, in ServiceUpdate) 
 		gatusKey = in.GatusKey
 	}
 
+	// Validate an explicit category assignment up front so an unknown (or
+	// malformed) category id is a clean ErrCategoryNotFound — distinct from the
+	// 22P02 the service id itself might raise — and the service is left
+	// untouched. Clearing (SetCategory with nil CategoryID) needs no check.
+	if in.SetCategory && in.CategoryID != nil {
+		if err := s.categoryExists(ctx, *in.CategoryID); err != nil {
+			return Service{}, err
+		}
+	}
+
 	var sv Service
 	err := s.pool.QueryRow(ctx,
-		`UPDATE services SET
-		   slug        = COALESCE($2, slug),
-		   name        = COALESCE($3, name),
-		   description = COALESCE($4, description),
-		   url         = COALESCE($5, url),
-		   icon        = COALESCE($6, icon),
-		   gatus_key   = CASE WHEN $7 THEN $8 ELSE gatus_key END,
-		   updated_at  = now()
-		 WHERE id = $1
-		 RETURNING id, slug, name, description, url, icon, COALESCE(gatus_key, '')`,
-		id, in.Slug, in.Name, in.Description, in.URL, in.Icon, setGatus, gatusKey,
-	).Scan(&sv.ID, &sv.Slug, &sv.Name, &sv.Description, &sv.URL, &sv.Icon, &sv.GatusKey)
+		`WITH updated AS (
+		   UPDATE services SET
+		     slug        = COALESCE($2, slug),
+		     name        = COALESCE($3, name),
+		     description = COALESCE($4, description),
+		     url         = COALESCE($5, url),
+		     icon        = COALESCE($6, icon),
+		     gatus_key   = CASE WHEN $7 THEN $8 ELSE gatus_key END,
+		     category_id = CASE WHEN $9 THEN $10 ELSE category_id END,
+		     updated_at  = now()
+		   WHERE id = $1
+		   RETURNING id, slug, name, description, url, icon, gatus_key, category_id
+		 )
+		 SELECT u.id, u.slug, u.name, u.description, u.url, u.icon, COALESCE(u.gatus_key, ''),
+		        u.category_id, c.name
+		   FROM updated u
+		   LEFT JOIN categories c ON c.id = u.category_id`,
+		id, in.Slug, in.Name, in.Description, in.URL, in.Icon, setGatus, gatusKey, in.SetCategory, in.CategoryID,
+	).Scan(&sv.ID, &sv.Slug, &sv.Name, &sv.Description, &sv.URL, &sv.Icon, &sv.GatusKey,
+		&sv.CategoryID, &sv.CategoryName)
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) {
 		if pgErr.Code == "23505" {
@@ -255,6 +302,21 @@ func (s *Store) UpdateService(ctx context.Context, id string, in ServiceUpdate) 
 		return Service{}, err
 	}
 	return sv, nil
+}
+
+// categoryExists returns nil when id names a real category, ErrCategoryNotFound
+// when it does not (including a malformed UUID).
+func (s *Store) categoryExists(ctx context.Context, id string) error {
+	var one int
+	err := s.pool.QueryRow(ctx, `SELECT 1 FROM categories WHERE id = $1`, id).Scan(&one)
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "22P02" { // malformed UUID
+		return ErrCategoryNotFound
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrCategoryNotFound
+	}
+	return err
 }
 
 // DeleteService removes a catalog entry. Returns ErrNotFound when id names no
