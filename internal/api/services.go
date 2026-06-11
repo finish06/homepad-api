@@ -11,16 +11,18 @@ import (
 )
 
 type serviceView struct {
-	ID          string `json:"id"`
-	Slug        string `json:"slug"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	URL         string `json:"url"`
-	Icon        string `json:"icon"`
-	Status      string `json:"status"`
-	Favorite    bool   `json:"favorite"`
-	IconLight   bool   `json:"iconLight"`
-	IconDark    bool   `json:"iconDark"`
+	ID           string  `json:"id"`
+	Slug         string  `json:"slug"`
+	Name         string  `json:"name"`
+	Description  string  `json:"description"`
+	URL          string  `json:"url"`
+	Icon         string  `json:"icon"`
+	Status       string  `json:"status"`
+	Favorite     bool    `json:"favorite"`
+	IconLight    bool    `json:"iconLight"`
+	IconDark     bool    `json:"iconDark"`
+	CategoryID   *string `json:"categoryId"`   // null when Uncategorized (v4)
+	CategoryName *string `json:"categoryName"` // null when Uncategorized; denormalized
 }
 
 // handleListServices serves the shared catalog with a live status badge per
@@ -53,16 +55,18 @@ func (s *server) handleListServices(w http.ResponseWriter, r *http.Request) {
 	out := make([]serviceView, 0, len(svcs))
 	for _, sv := range svcs {
 		out = append(out, serviceView{
-			ID:          sv.ID,
-			Slug:        sv.Slug,
-			Name:        sv.Name,
-			Description: sv.Description,
-			URL:         sv.URL,
-			Icon:        sv.Icon,
-			Status:      statusFor(snap, sv.GatusKey),
-			Favorite:    favs[sv.ID],
-			IconLight:   icons[sv.ID].Light,
-			IconDark:    icons[sv.ID].Dark,
+			ID:           sv.ID,
+			Slug:         sv.Slug,
+			Name:         sv.Name,
+			Description:  sv.Description,
+			URL:          sv.URL,
+			Icon:         sv.Icon,
+			Status:       statusFor(snap, sv.GatusKey),
+			Favorite:     favs[sv.ID],
+			IconLight:    icons[sv.ID].Light,
+			IconDark:     icons[sv.ID].Dark,
+			CategoryID:   sv.CategoryID,
+			CategoryName: sv.CategoryName,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"services": out})
@@ -142,12 +146,13 @@ func (s *server) handleUpdateService(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var in struct {
-		Slug        *string `json:"slug"`
-		Name        *string `json:"name"`
-		Description *string `json:"description"`
-		URL         *string `json:"url"`
-		Icon        *string `json:"icon"`
-		GatusKey    *string `json:"gatus_key"`
+		Slug        *string        `json:"slug"`
+		Name        *string        `json:"name"`
+		Description *string        `json:"description"`
+		URL         *string        `json:"url"`
+		Icon        *string        `json:"icon"`
+		GatusKey    *string        `json:"gatus_key"`
+		CategoryID  optionalString `json:"categoryId"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		http.Error(w, "invalid JSON body", http.StatusBadRequest)
@@ -161,7 +166,13 @@ func (s *server) handleUpdateService(w http.ResponseWriter, r *http.Request) {
 		URL:         in.URL,
 		Icon:        in.Icon,
 		GatusKey:    in.GatusKey,
+		SetCategory: in.CategoryID.Set,
+		CategoryID:  in.CategoryID.Value,
 	})
+	if errors.Is(err, storage.ErrCategoryNotFound) {
+		http.Error(w, "no such category", http.StatusBadRequest)
+		return
+	}
 	if errors.Is(err, storage.ErrNotFound) {
 		http.Error(w, "no such service", http.StatusNotFound)
 		return
@@ -176,14 +187,39 @@ func (s *server) handleUpdateService(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, serviceView{
-		ID:          sv.ID,
-		Slug:        sv.Slug,
-		Name:        sv.Name,
-		Description: sv.Description,
-		URL:         sv.URL,
-		Icon:        sv.Icon,
-		Status:      statusFor(s.poller.Snapshot(), sv.GatusKey),
+		ID:           sv.ID,
+		Slug:         sv.Slug,
+		Name:         sv.Name,
+		Description:  sv.Description,
+		URL:          sv.URL,
+		Icon:         sv.Icon,
+		Status:       statusFor(s.poller.Snapshot(), sv.GatusKey),
+		CategoryID:   sv.CategoryID,
+		CategoryName: sv.CategoryName,
 	})
+}
+
+// optionalString distinguishes JSON's three states for a nullable field: the
+// key absent (Set false → leave unchanged), present as null (Set true, Value
+// nil → clear), or present with a string (Set true, Value set). UnmarshalJSON
+// only fires when the key is present, so absence is captured for free.
+type optionalString struct {
+	Set   bool
+	Value *string
+}
+
+func (o *optionalString) UnmarshalJSON(b []byte) error {
+	o.Set = true
+	if string(b) == "null" {
+		o.Value = nil
+		return nil
+	}
+	var v string
+	if err := json.Unmarshal(b, &v); err != nil {
+		return err
+	}
+	o.Value = &v
+	return nil
 }
 
 // handleDeleteService lets an admin remove a catalog entry (A6). Non-admins get 403.
