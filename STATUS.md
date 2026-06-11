@@ -3,6 +3,60 @@
 > NATS result reports are being lost to a harness bug, so this file is how I
 > talk to you, Joe. Updated + pushed every run. Newest run on top.
 
+## This run (2026-06-11) — v3 theme-mode BACKEND slice ✅ test-first, all green on the test DB
+
+**PR #5 (open, mergeable, base `main`):** https://gitea.kube.calebdunn.tech/Code/homepad-api/pulls/5 — **CI green** (Backend vet/build/tests, push + pull_request). Left open for review, not merged. 7 files, +282/−11.
+
+
+Joe approved the v3 decisions (Q1 control=header user-menu, Q2 endpoint=`PATCH
+/api/me`, Q3 persistence=per-user Postgres + localStorage first-paint cache —
+see `Code/homepad/specs/DECISIONS.md`). This run is the **backend slice only**,
+test-first per `specs/v3-theme-mode.md`; the web `ThemeProvider` + the
+three-segment control is the **next** increment, not this one.
+
+**Branch:** `feat/v3-theme-mode` → base **`main`**. (v2 landed on `main` while I
+was working — PRs #3/#4 merged `feat/app-icons` into `main` = `df62360`, so I
+rebased onto current `main`; the PR is a clean single-commit v3-only diff with
+`0003` correctly on top of `0002`.)
+
+**Migration `0003_theme_pref` (additive, up + down):** one column —
+`users.theme_pref TEXT NOT NULL DEFAULT 'system' CHECK (theme_pref IN
+('system','light','dark'))`. `DEFAULT 'system'` backfills every existing row to
+the intended default (zero data migration); the `CHECK` mirrors the v1/v2
+`role`/`variant` pattern so a bad value can never persist. The seeded 39-app
+catalog and all other tables are **untouched**. Down is `DROP COLUMN IF EXISTS`
+— verified end-to-end against the test DB: up→down drops the column, re-up
+re-adds it and existing rows read back `system` (A11).
+
+**Storage (`internal/storage`):** `User` gains `ThemePref`; the user
+read/create queries now select/return `theme_pref`; new
+`SetThemePref(userID, pref)` updates **only that user's row** (`ErrNotFound` if
+the id is unknown).
+
+**API (`internal/api/auth.go` + route):**
+- `userView` gains `themePref` (via a small `newUserView` helper), so the stored
+  preference rides along on **register, login, and `GET /api/me`** — no extra
+  round-trip (A2).
+- New **`PATCH /api/me {themePref}`** — session-gated: **401** when
+  unauthenticated; **400** on any value other than `system|light|dark` (handler
+  validates first; the column `CHECK` is a backstop), leaving the stored value
+  unchanged; **200** with the updated `userView` on success. Writes **only the
+  caller's row** — there is no path to another user's theme (A5/A6/A7).
+
+**Tests (`internal/api/theme_test.go`, test-first RED→GREEN):** A2 (default
+`system` on register + `GET /api/me`), A5 (set `dark` in one session → read back
+in a fresh session for the same user), A6 (rejects `neon`/`Dark`/``/`SYSTEM` →
+400, stored value unchanged), A7 (no cookie → 401; one user's write leaves
+another user's row at `system`). A11 migration round-trip verified directly
+against the test DB. **Full suite green** on `homepad-testdb.stitch.svc`,
+`go vet ./...` clean, `go build ./...` clean. v1's A1–A11 + v2's icon suite still
+pass unchanged.
+
+**Next run:** the web `homepad` v3 slice — `ThemeProvider` (context + live
+`matchMedia` following under `system`), the three-segment header control
+(optimistic-with-rollback `PATCH`), the anti-flash inline boot script, and
+wiring v2's icon precedence to the resolved theme (A1/A3/A4/A8–A10/A12).
+
 ## This run (2026-06-10) — v2 app-icons BACKEND slice ✅ test-first, all green on the test DB
 
 Branch `feat/app-icons` off freshly-merged `main`. First v2 increment: the whole

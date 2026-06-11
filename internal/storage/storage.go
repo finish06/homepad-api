@@ -33,6 +33,7 @@ type User struct {
 	Email        string
 	PasswordHash string
 	Role         string
+	ThemePref    string
 }
 
 // Service is a catalog entry. GatusKey is empty when the service is unmonitored.
@@ -118,9 +119,9 @@ func (s *Store) CreateUser(ctx context.Context, email, passwordHash, role string
 	var u User
 	err := s.pool.QueryRow(ctx,
 		`INSERT INTO users (email, password_hash, role) VALUES ($1, $2, $3)
-		 RETURNING id, email, password_hash, role`,
+		 RETURNING id, email, password_hash, role, theme_pref`,
 		email, passwordHash, role,
-	).Scan(&u.ID, &u.Email, &u.PasswordHash, &u.Role)
+	).Scan(&u.ID, &u.Email, &u.PasswordHash, &u.Role, &u.ThemePref)
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 		return User{}, ErrEmailTaken
@@ -137,6 +138,21 @@ func (s *Store) UserByEmail(ctx context.Context, email string) (User, error) {
 
 func (s *Store) UserByID(ctx context.Context, id string) (User, error) {
 	return s.userBy(ctx, `WHERE id = $1`, id)
+}
+
+// SetThemePref updates a single user's theme preference (v3). The handler
+// validates pref against the allowed set first; the column CHECK is a backstop.
+// Writes only userID's row. Returns ErrNotFound when userID names no user.
+func (s *Store) SetThemePref(ctx context.Context, userID, pref string) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE users SET theme_pref = $2 WHERE id = $1`, userID, pref)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // ListServices returns the shared catalog in userID's personal layout order
@@ -439,8 +455,8 @@ func (s *Store) SetLayout(ctx context.Context, userID string, orderedIDs []strin
 func (s *Store) userBy(ctx context.Context, where string, arg any) (User, error) {
 	var u User
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, email, password_hash, role FROM users `+where, arg,
-	).Scan(&u.ID, &u.Email, &u.PasswordHash, &u.Role)
+		`SELECT id, email, password_hash, role, theme_pref FROM users `+where, arg,
+	).Scan(&u.ID, &u.Email, &u.PasswordHash, &u.Role, &u.ThemePref)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, ErrNotFound
 	}

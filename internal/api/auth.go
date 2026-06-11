@@ -17,9 +17,14 @@ type credentials struct {
 }
 
 type userView struct {
-	ID    string `json:"id"`
-	Email string `json:"email"`
-	Role  string `json:"role"`
+	ID        string `json:"id"`
+	Email     string `json:"email"`
+	Role      string `json:"role"`
+	ThemePref string `json:"themePref"`
+}
+
+func newUserView(u storage.User) userView {
+	return userView{ID: u.ID, Email: u.Email, Role: u.Role, ThemePref: u.ThemePref}
 }
 
 func (s *server) handleRegister(w http.ResponseWriter, r *http.Request) {
@@ -61,7 +66,7 @@ func (s *server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, userView{ID: u.ID, Email: u.Email, Role: u.Role})
+	writeJSON(w, http.StatusCreated, newUserView(u))
 }
 
 func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
@@ -88,7 +93,7 @@ func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
 	})
-	writeJSON(w, http.StatusOK, userView{ID: u.ID, Email: u.Email, Role: u.Role})
+	writeJSON(w, http.StatusOK, newUserView(u))
 }
 
 func (s *server) handleLogout(w http.ResponseWriter, r *http.Request) {
@@ -112,7 +117,42 @@ func (s *server) handleMe(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	writeJSON(w, http.StatusOK, userView{ID: u.ID, Email: u.Email, Role: u.Role})
+	writeJSON(w, http.StatusOK, newUserView(u))
+}
+
+// handlePatchMe updates the current user's own account fields. For v3 the only
+// field is themePref (system|light|dark). Session-gated: 401 if not logged in.
+// An unknown themePref value → 400, leaving the stored value unchanged. It
+// writes only the current user's row — there is no path to another user's.
+func (s *server) handlePatchMe(w http.ResponseWriter, r *http.Request) {
+	u, ok := s.currentUser(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var body struct {
+		ThemePref string `json:"themePref"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		return
+	}
+	if !validThemePref(body.ThemePref) {
+		http.Error(w, "themePref must be one of system, light, dark", http.StatusBadRequest)
+		return
+	}
+
+	if err := s.store.SetThemePref(r.Context(), u.ID, body.ThemePref); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	u.ThemePref = body.ThemePref
+	writeJSON(w, http.StatusOK, newUserView(u))
+}
+
+func validThemePref(v string) bool {
+	return v == "system" || v == "light" || v == "dark"
 }
 
 func (s *server) currentUser(r *http.Request) (storage.User, bool) {
