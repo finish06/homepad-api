@@ -47,7 +47,7 @@ func NewOIDCServer(t *testing.T, cfg oidc.Config) (*httptest.Server, *storage.St
 		Store:        store,
 		Poller:       poller,
 		Sessions:     session.NewManager(),
-		Registration: "open",
+		Registration: api.RegistrationOpen,
 		OIDC:         cfg,
 	})
 	srv := httptest.NewServer(h)
@@ -106,7 +106,7 @@ func NewServer(t *testing.T) *httptest.Server {
 		Store:        store,
 		Poller:       poller,
 		Sessions:     sessions,
-		Registration: "open",
+		Registration: api.RegistrationOpen,
 	})
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)

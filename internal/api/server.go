@@ -20,7 +20,7 @@ type Deps struct {
 	Store        *storage.Store
 	Poller       *gatus.Poller
 	Sessions     *session.Manager
-	Registration string
+	Registration RegistrationMode
 	OIDC         oidc.Config
 }
 
@@ -28,7 +28,7 @@ type server struct {
 	store        *storage.Store
 	poller       *gatus.Poller
 	sessions     *session.Manager
-	registration string
+	registration RegistrationMode
 	oidc         oidc.Config
 	provider     *oidc.Provider
 	pending      *oidc.Pending

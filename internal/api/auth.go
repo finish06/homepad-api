@@ -41,11 +41,12 @@ func (s *server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// First registered user bootstraps as admin (spec Q2); after that,
-	// self-registration is only allowed when HOMEPAD_REGISTRATION=open.
+	// self-registration is only allowed when registration is open. Any mode
+	// other than RegistrationOpen fails closed (fail-safe; see #10).
 	role := "user"
 	if count == 0 {
 		role = "admin"
-	} else if s.registration == "invite_only" {
+	} else if s.registration != RegistrationOpen {
 		http.Error(w, "registration is invite-only", http.StatusForbidden)
 		return
 	}
