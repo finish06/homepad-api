@@ -43,6 +43,10 @@ type User struct {
 	PasswordHash string
 	Role         string
 	ThemePref    string
+	// DisplayName is the optional human name (v7). The column is nullable; it
+	// is scanned via COALESCE so an unset name reads as "" (the frontend then
+	// falls back to the email's first letter for the avatar).
+	DisplayName string
 }
 
 // Service is a catalog entry. GatusKey is empty when the service is unmonitored.
@@ -140,9 +144,9 @@ func (s *Store) CreateUser(ctx context.Context, email, passwordHash, role string
 	var u User
 	err := s.pool.QueryRow(ctx,
 		`INSERT INTO users (email, password_hash, role) VALUES ($1, $2, $3)
-		 RETURNING id, email, password_hash, role, theme_pref`,
+		 RETURNING id, email, password_hash, role, theme_pref, COALESCE(display_name, '')`,
 		email, passwordHash, role,
-	).Scan(&u.ID, &u.Email, &u.PasswordHash, &u.Role, &u.ThemePref)
+	).Scan(&u.ID, &u.Email, &u.PasswordHash, &u.Role, &u.ThemePref, &u.DisplayName)
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 		return User{}, ErrEmailTaken
@@ -517,8 +521,8 @@ func (s *Store) SetLayout(ctx context.Context, userID string, orderedIDs []strin
 func (s *Store) userBy(ctx context.Context, where string, arg any) (User, error) {
 	var u User
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, email, password_hash, role, theme_pref FROM users `+where, arg,
-	).Scan(&u.ID, &u.Email, &u.PasswordHash, &u.Role, &u.ThemePref)
+		`SELECT id, email, password_hash, role, theme_pref, COALESCE(display_name, '') FROM users `+where, arg,
+	).Scan(&u.ID, &u.Email, &u.PasswordHash, &u.Role, &u.ThemePref, &u.DisplayName)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, ErrNotFound
 	}

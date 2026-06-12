@@ -26,10 +26,13 @@ type userView struct {
 	Email     string `json:"email"`
 	Role      string `json:"role"`
 	ThemePref string `json:"themePref"`
+	// Name is the user's display name (v7 §6.2); empty when unset, in which
+	// case the frontend derives the avatar from the email's first letter.
+	Name string `json:"name"`
 }
 
 func newUserView(u storage.User) userView {
-	return userView{ID: u.ID, Email: u.Email, Role: u.Role, ThemePref: u.ThemePref}
+	return userView{ID: u.ID, Email: u.Email, Role: u.Role, ThemePref: u.ThemePref, Name: u.DisplayName}
 }
 
 func (s *server) handleRegister(w http.ResponseWriter, r *http.Request) {
