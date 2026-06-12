@@ -92,6 +92,7 @@ func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   s.cookieSecure,
 		SameSite: http.SameSiteLaxMode,
 	})
 	writeJSON(w, http.StatusOK, newUserView(u))
@@ -106,6 +107,7 @@ func (s *server) handleLogout(w http.ResponseWriter, r *http.Request) {
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   s.cookieSecure,
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   -1,
 	})
