@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"os"
 	"time"
 
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/gatus"
@@ -29,6 +30,7 @@ type server struct {
 	poller       *gatus.Poller
 	sessions     *session.Manager
 	registration RegistrationMode
+	cookieSecure bool
 	oidc         oidc.Config
 	provider     *oidc.Provider
 	pending      *oidc.Pending
@@ -40,6 +42,7 @@ func New(d Deps) http.Handler {
 		poller:       d.Poller,
 		sessions:     d.Sessions,
 		registration: d.Registration,
+		cookieSecure: ParseCookieSecure(os.Getenv("COOKIE_SECURE")),
 		oidc:         d.OIDC,
 	}
 
