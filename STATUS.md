@@ -3,6 +3,60 @@
 > NATS result reports are being lost to a harness bug, so this file is how I
 > talk to you, Joe. Updated + pushed every run. Newest run on top.
 
+## 2026-06-12 — v5 collapsible-categories BACKEND slice ✅ test-first, all green on the test DB
+
+Joe approved the v5 decisions (Q1 dedicated `/api/me/collapsed-categories`
+endpoints, Q2 Favorites+Uncategorized always-expanded / no sentinel flags, Q3 no
+admin default-collapse, Q4 persist the **collapsed** set — recorded in
+`specs/DECISIONS.md` 2026-06-12). This run is the **backend slice only**; the web
+disclosure (collapse toggle on category headers + accessible disclosure +
+anti-flash) is the **next** increment, not this one.
+
+**Shipped, test-first (RED→GREEN→REFACTOR):**
+- **Migration `0005_category_collapse`** (after `0004`) — additive
+  `user_collapsed_categories` table, PK `(user_id, category_id)`, **both FKs
+  `ON DELETE CASCADE`** so deleting a user or a category auto-cleans collapse
+  rows (no orphans, no cleanup code). Clean `up`+`down` (down drops the table →
+  everything renders expanded = v4 behavior); down→up roundtrip verified against
+  the test DB.
+- **`GET /api/me/collapsed-categories`** — returns `{collapsed:[ids]}`, the
+  current user's collapsed set; default empty (everything expanded).
+- **`PUT /api/me/collapsed-categories`** — `{collapsed:[ids]}` → **204**,
+  whole-set replace (like `PUT /api/layout`). Unknown / stale (deleted) /
+  malformed ids are **silently dropped** (storage keeps only ids naming a live
+  category via `c.id::text = ANY($2::text[])` — never a 4xx).
+- Both **session-gated**: unauthenticated → **401**; a user only reads/writes
+  their **own** set (keyed on `currentUser`, no path to another user's).
+- Additive + back-compat: no existing route or table changed; `/api/me`,
+  `/api/services`, `/api/categories` untouched. Test-support `TRUNCATE` extended
+  with the new table.
+
+**Verification — backend `go test ./... -count=1 -p 1` against `homepad-testdb`:
+all packages green** (`internal/api`, `internal/storage`, `internal/gatus`),
+`go vet` + `gofmt -l` clean. 8 new API integration tests in
+`internal/api/collapse_test.go` pin the API-verified ACs:
+
+| AC | Criterion | Verified by | Result |
+|----|-----------|-------------|--------|
+| A2 | Default expanded — fresh user `GET` → `{collapsed:[]}` | `TestCollapsedDefaultsEmpty` | ✅ MET |
+| A3 | Persists per-user across sessions | `TestCollapsePersistsAcrossSessions` | ✅ MET |
+| A4 | Private to the user (A's collapse doesn't touch B) | `TestCollapseIsPrivateToUser` | ✅ MET |
+| A5 | Whole-set replace; unknown/stale/malformed ids dropped (no 4xx) | `TestPutReplacesAndDropsUnknownIds` | ✅ MET |
+| A6 | Both endpoints require a session → 401 | `TestCollapseRequiresSession` | ✅ MET |
+| A7 | Delete category cascades — no orphan collapse row | `TestDeleteCategoryCascadesCollapse` | ✅ MET |
+| A8 | Rename/reorder don't change collapse (keyed on id) | `TestRenameReorderKeepsCollapse` | ✅ MET |
+| A11 | New category renders expanded (in no collapsed set) | `TestNewCategoryRendersExpanded` | ✅ MET |
+
+A1/A9/A10/A12 are web ACs (disclosure interaction, a11y, optimistic rollback,
+flat-when-empty) — they belong to the **next** web slice in `homepad`, not this
+backend increment.
+
+**down-migration honesty (same as 0001–0004):** `Migrate` only embeds/applies
+`*.up.sql`, so `0005…down.sql` is a manual rollback script — its
+syntax/roundtrip is verified by inspection + a scripted down→up against the test
+DB this run, not by an automated suite test. Consistent with every prior
+migration; not a regression.
+
 ## 2026-06-11 — v4 app-categories DONE ✅
 
 **Completeness audit (Caleb's confirmation task).** v4 app-categories is shipped
