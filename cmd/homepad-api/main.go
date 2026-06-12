@@ -40,11 +40,20 @@ func main() {
 		}
 	}()
 
+	// Normalize HOMEPAD_REGISTRATION once, here, into a typed mode. Anything
+	// other than "open"/"invite_only"/"invite-only" is unrecognized and fails
+	// closed (registration disabled) — never fail open on a typo (#10).
+	rawReg := envOr("HOMEPAD_REGISTRATION", "open")
+	regMode, ok := api.ParseRegistrationMode(rawReg)
+	if !ok {
+		log.Printf("warning: unrecognized HOMEPAD_REGISTRATION=%q; failing closed (self-registration disabled)", rawReg)
+	}
+
 	h := api.New(api.Deps{
 		Store:        store,
 		Poller:       poller,
 		Sessions:     session.NewManager(),
-		Registration: envOr("HOMEPAD_REGISTRATION", "open"),
+		Registration: regMode,
 		OIDC:         oidc.ConfigFromEnv(),
 	})
 
