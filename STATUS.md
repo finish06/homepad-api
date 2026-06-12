@@ -3,6 +3,58 @@
 > NATS result reports are being lost to a harness bug, so this file is how I
 > talk to you, Joe. Updated + pushed every run. Newest run on top.
 
+## 2026-06-11 — v4 app-categories DONE ✅
+
+**Completeness audit (Caleb's confirmation task).** v4 app-categories is shipped
+end to end and **fully done**: backend (migration `0004` + category
+CRUD/reorder/assign, PR #6), web grouped-catalog render (PR #11), and web admin
+category-management UI (PR #12) are all merged to `main` and deployed. Joe
+verified the live data layer: 3 categories (Kube/Media/External), 39 apps
+assigned, 0 uncategorized; `GET /api/categories` + `categoryId`/`categoryName`
+on services all working.
+
+> **Supersedes the stale note in the run below**, which said "the web
+> grouped-catalog render is the **next** increment, not this one." That web
+> increment (and the admin UI) has since landed and merged. v4 is complete; the
+> note below described only the first (backend) slice at the time it was written.
+
+**I re-ran every suite this audit** — backend `go test ./... -count=1 -p 1`
+against the test DB (`homepad-testdb`): **all packages green** (`internal/api`,
+`internal/storage`, `internal/gatus`), `go vet` clean. (Running without `-p 1`
+trips the known cross-package truncate race the `categories_test.go` header
+documents — the Makefile/CI command is `-p 1` and is green.)
+
+**All 12 v4 acceptance criteria (`specs/v4-app-categories.md`) verified = MET.**
+Backend ACs are each pinned to a named integration test in
+`internal/api/categories_test.go` (+ storage twins in
+`internal/storage/categories_test.go`):
+
+| AC | Criterion | Verified by | Result |
+|----|-----------|-------------|--------|
+| A1 | Create category; appears in GET; dup name → 409 | `TestAdminCanCreateCategory_AndDuplicate409` | ✅ MET |
+| A2 | Non-admin → 403 on create/rename/reorder/delete **and** assign | `TestNonAdmin_403_OnEveryCategoryMutation` | ✅ MET |
+| A3 | Rename → 200; collide → 409; unknown id → 404 | `TestAdminCanRenameCategory_409_404` | ✅ MET |
+| A4 | Reorder via `PUT /api/categories/order`; GET reflects order | `TestAdminCanReorderCategories` | ✅ MET |
+| A5 | Assign + clear a service's category (`categoryId: id`/`null`) | `TestAdminCanAssignAndClearServiceCategory` + storage `TestUpdateService_CategoryThreeState` | ✅ MET |
+| A6 | Bogus `categoryId` → 400, service unchanged | `TestAssignUnknownCategory_400_ServiceUnchanged` (+ malformed-uuid case in storage) | ✅ MET |
+| A7 | Delete → apps Uncategorized (FK SET NULL), no service deleted; idempotent | `TestDeleteCategory_UnassignsServices_Idempotent` + storage `TestDeleteCategory_SetsServicesNull_AndIdempotent` | ✅ MET |
+| A8 | `GET /api/services` carries `categoryId`/`categoryName` (null when Uncategorized) | `TestServicesList_CarriesCategoryFields` | ✅ MET |
+| A12 | Additive migration; seeded apps start Uncategorized; up+down clean | Migration is `CREATE TABLE IF NOT EXISTS` + `ADD COLUMN IF NOT EXISTS` (no existing-column changes); a new service reads back `category_id IS NULL` (storage `TestUpdateService_CategoryThreeState`); `0004…down.sql` drops index→column→table cleanly | ✅ MET |
+
+A9/A10/A11 are web ACs (grouped render, flat-when-empty, within-section
+behavior) — verified in `homepad` (see that repo's STATUS); listed here only for
+the full 12.
+
+**A12 note (honest):** the additive + default-NULL leg is test-covered; the
+down-migration "reverts to flat" leg is verified by inspection + Joe's live
+rollout, not an automated test — `Migrate` only embeds/applies `*.up.sql`, so
+`*.down.sql` are manual rollback scripts. This matches the established
+0001–0003 convention (every prior migration ships an un-auto-tested `down.sql`);
+it is **not** a v4 regression, so A12 stands MET. No genuine v4 gap found — no
+`NEEDS JOE`.
+
+This run is **docs-only** (audit + this summary); no app code changed.
+
 ## This run (2026-06-11) — v4 app-categories BACKEND slice ✅ test-first, all green on the test DB
 
 Joe approved the v4 decisions (Q1 start-fresh / zero seed, Q2 no per-category
