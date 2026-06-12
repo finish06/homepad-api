@@ -4,12 +4,17 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/mail"
 	"strings"
 
 	"golang.org/x/crypto/bcrypt"
 
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/storage"
 )
+
+// minPasswordLen is the minimum length enforced at registration (#12). Kept
+// modest so it gates obviously-weak inputs without dictating a full policy.
+const minPasswordLen = 8
 
 type credentials struct {
 	Email    string `json:"email"`
@@ -181,6 +186,14 @@ func decodeCredentials(w http.ResponseWriter, r *http.Request) (credentials, boo
 	c.Email = strings.TrimSpace(c.Email)
 	if c.Email == "" || c.Password == "" {
 		http.Error(w, "email and password are required", http.StatusBadRequest)
+		return c, false
+	}
+	if _, err := mail.ParseAddress(c.Email); err != nil {
+		http.Error(w, "invalid email address", http.StatusBadRequest)
+		return c, false
+	}
+	if len(c.Password) < minPasswordLen {
+		http.Error(w, "password must be at least 8 characters", http.StatusBadRequest)
 		return c, false
 	}
 	return c, true
