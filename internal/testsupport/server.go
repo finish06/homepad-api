@@ -95,10 +95,14 @@ func NewServer(t *testing.T) *httptest.Server {
 	sessions.Bind("session-one", user)
 	sessions.Bind("session-two", user)
 
-	// Two monitored catalog entries so /api/services is non-empty. Gatus points
-	// at a black hole below, so both resolve UNKNOWN (A9).
-	seedService(t, ctx, store, "gitea", "Gitea", "core_gitea")
-	seedService(t, ctx, store, "grafana", "Grafana", "core_grafana")
+	// v9 — services are per-user now. Seed each test user their OWN two
+	// monitored entries so /api/services is non-empty for whichever session a
+	// test signs in as. Gatus points at a black hole below, so all resolve
+	// UNKNOWN (A9).
+	for _, owner := range []string{admin, user} {
+		seedService(t, ctx, store, owner, "gitea", "Gitea", "core_gitea")
+		seedService(t, ctx, store, owner, "grafana", "Grafana", "core_grafana")
+	}
 
 	poller := gatus.NewPoller(gatus.NewClient("http://127.0.0.1:1"), time.Hour)
 
@@ -121,7 +125,7 @@ func truncate(t *testing.T, ctx context.Context, dsn string) {
 	}
 	defer conn.Close(ctx)
 	if _, err := conn.Exec(ctx,
-		`TRUNCATE user_collapsed_categories, user_layout, favorites, services, categories, users RESTART IDENTITY CASCADE`); err != nil {
+		`TRUNCATE user_collapsed_categories, user_layout, favorites, service_icons, library_apps, services, categories, users RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 }
@@ -139,9 +143,9 @@ func seedUser(t *testing.T, ctx context.Context, store *storage.Store, email, pa
 	return u.ID
 }
 
-func seedService(t *testing.T, ctx context.Context, store *storage.Store, slug, name, gatusKey string) {
+func seedService(t *testing.T, ctx context.Context, store *storage.Store, userID, slug, name, gatusKey string) {
 	t.Helper()
-	if _, err := store.CreateService(ctx, storage.Service{
+	if _, err := store.CreateService(ctx, userID, storage.Service{
 		Slug:     slug,
 		Name:     name,
 		URL:      "https://" + slug + ".example.com",

@@ -12,19 +12,19 @@ import (
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/testsupport"
 )
 
-// AC A6 — Admin can CRUD catalog; non-admin gets 403.
+// v9 (A4) — the v6 admin gate on services is GONE: any user manages their OWN
+// dashboard. The old "non-admin → 403" tests are inverted to "non-admin
+// succeeds on their own rows"; cross-user 404 is covered in isolation_test.go
+// (A14).
 
-func TestUserCannotCreateService_403(t *testing.T) {
+func TestUserCanCreateOwnService_A4(t *testing.T) {
 	s := testsupport.NewServer(t)
 	defer s.Close()
 
+	// A slug the user doesn't already have (fixtures seed gitea/grafana).
 	body, _ := json.Marshal(map[string]any{
-		"slug":        "gitea",
-		"name":        "Gitea",
-		"description": "Git hosting",
-		"url":         "https://gitea.kube.calebdunn.tech",
-		"icon":        "gitea",
-		"gatus_key":   "core_gitea",
+		"slug": "jellyfin", "name": "Jellyfin", "description": "Media server",
+		"url": "https://jellyfin.kube.calebdunn.tech", "icon": "jellyfin", "gatus_key": "media_jellyfin",
 	})
 	req, _ := http.NewRequest(http.MethodPost, s.URL+"/api/services", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -33,8 +33,12 @@ func TestUserCannotCreateService_403(t *testing.T) {
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
-	assert.Equal(t, http.StatusForbidden, resp.StatusCode,
-		"non-admin POST /api/services must return 403")
+	assert.Equal(t, http.StatusCreated, resp.StatusCode,
+		"v9: a non-admin POST /api/services creates on their OWN dashboard → 201")
+
+	// It appears on the caller's dashboard (2 seeded + the new one).
+	svcs := listServices(t, s.URL, "non-admin-session")
+	assert.Len(t, svcs, 3, "the created service is on the caller's own dashboard")
 }
 
 func TestAdminCanCreateService_201(t *testing.T) {
@@ -91,14 +95,14 @@ func TestAdminCanEditService_200(t *testing.T) {
 	assert.Equal(t, "Gitea (renamed)", got.Name, "PATCH must apply the new name")
 }
 
-func TestUserCannotEditService_403(t *testing.T) {
+func TestUserCanEditOwnService_A4(t *testing.T) {
 	s := testsupport.NewServer(t)
 	defer s.Close()
 
 	svcs := listServices(t, s.URL, "non-admin-session")
 	require.NotEmpty(t, svcs)
 
-	body, _ := json.Marshal(map[string]any{"name": "nope"})
+	body, _ := json.Marshal(map[string]any{"name": "My Renamed App"})
 	req, _ := http.NewRequest(http.MethodPatch, s.URL+"/api/services/"+svcs[0].ID, bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(&http.Cookie{Name: "homepad_session", Value: "non-admin-session"})
@@ -106,8 +110,13 @@ func TestUserCannotEditService_403(t *testing.T) {
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
-	assert.Equal(t, http.StatusForbidden, resp.StatusCode,
-		"non-admin PATCH /api/services/{id} must return 403")
+	require.Equal(t, http.StatusOK, resp.StatusCode,
+		"v9: a non-admin PATCH of their OWN service → 200")
+	var got struct {
+		Name string `json:"name"`
+	}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&got))
+	assert.Equal(t, "My Renamed App", got.Name)
 }
 
 func TestAdminCanDeleteService_204(t *testing.T) {
@@ -137,7 +146,7 @@ func TestAdminCanDeleteService_204(t *testing.T) {
 		"deleting an already-deleted service must return 404")
 }
 
-func TestUserCannotDeleteService_403(t *testing.T) {
+func TestUserCanDeleteOwnService_A4(t *testing.T) {
 	s := testsupport.NewServer(t)
 	defer s.Close()
 
@@ -150,6 +159,6 @@ func TestUserCannotDeleteService_403(t *testing.T) {
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
-	assert.Equal(t, http.StatusForbidden, resp.StatusCode,
-		"non-admin DELETE /api/services/{id} must return 403")
+	assert.Equal(t, http.StatusNoContent, resp.StatusCode,
+		"v9: a non-admin DELETE of their OWN service → 204")
 }

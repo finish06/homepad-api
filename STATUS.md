@@ -3,6 +3,37 @@
 > NATS result reports are being lost to a harness bug, so this file is how I
 > talk to you, Joe. Updated + pushed every run. Newest run on top.
 
+---
+
+## v9 DELIVERABLE PLAN (source of truth) — GREENLIT 2026-06-13
+
+v9 (per-user dashboards + admin-curated App Library, `specs/v9-per-user-dashboards.md`)
+ships as **3 sequential, self-contained loop iterations**. Each is RED→GREEN→commit
+→CI→merge→Joe deploys→Gracie validates→prod **before the next starts**.
+
+- **v9.1 — per-user backend cutover** (spec slices 1+2; ACs **A1–A7, A14**).
+  - Migration **`0007_per_user_dashboards`** (NOTE: spec said "0006" but `0006_display_name`
+    already merged for v7, so this is **0007**) — create+seed `library_apps` from the
+    existing services; add `user_id`/`source_library_id` to `services`, `user_id` to
+    `categories`; swap global→per-user uniqueness; one-time transform assigning the
+    existing catalog + categories to the FIRST admin (`role='admin' ORDER BY created_at`,
+    = `finish.06@gmail.com` in prod) so that dashboard survives + seeds the library.
+  - Per-user scoping of services/categories/icons **reads AND writes**; ownership check
+    → **404 cross-user** (D2). DROP the admin gate on services/categories/icons writes;
+    narrow `requireAdmin` to library+system routes (D10); rewrite the v6 403-based
+    mutation tests to the new per-user model.
+  - **Headline invariant:** cross-user isolation (A14) — a user can NEVER read/write
+    another user's rows → 404. Explicit adversarial test.
+- **v9.2 — App Library CRUD (admin) + browse (any user) + add-from-library copy**
+  (spec slices 3+4; ACs **A8–A13**). NOT this task.
+- **v9.3 — web surfaces**: empty-dashboard CTA + browse/add UI + admin settings
+  (spec slices 5+6; ACs **A15–A19**). NOT this task.
+
+**THIS TASK = v9.1 ONLY.** Joe runs v9.1 staging→Gracie→prod, THEN dispatches v9.2.
+
+### v9.1 progress (this run)
+- [ ] (see "v9.1" run section below — updated as work lands)
+
 ## 2026-06-12 — v5 collapsible-categories BACKEND slice ✅ test-first, all green on the test DB
 
 Joe approved the v5 decisions (Q1 dedicated `/api/me/collapsed-categories`

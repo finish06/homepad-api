@@ -62,6 +62,10 @@ type Service struct {
 	GatusKey     string
 	CategoryID   *string
 	CategoryName *string
+	// SourceLibraryID is provenance only (C1): the library offer a copy was
+	// added from, or nil for a custom app. Set on add-from-library (v9.2) and
+	// by the 0007 cutover; never changes behavior.
+	SourceLibraryID *string
 }
 
 // Category is an admin-curated catalog section (v4). Ordering is the explicit
@@ -180,16 +184,17 @@ func (s *Store) SetThemePref(ctx context.Context, userID, pref string) error {
 	return nil
 }
 
-// ListServices returns the shared catalog in userID's personal layout order
-// (A5): services the user has placed come first by their saved sort_index, and
-// any not yet placed fall back to name order after them.
+// ListServices returns userID's OWN catalog (v9 — per-user, Invariant 2) in
+// their personal layout order (A5/A6): services the user has placed come first
+// by their saved sort_index, then any not-yet-placed in name order.
 func (s *Store) ListServices(ctx context.Context, userID string) ([]Service, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT s.id, s.slug, s.name, s.description, s.url, s.icon, COALESCE(s.gatus_key, ''),
-		        s.category_id, c.name
+		        s.category_id, c.name, s.source_library_id
 		   FROM services s
 		   LEFT JOIN user_layout ul ON ul.service_id = s.id AND ul.user_id = $1
 		   LEFT JOIN categories c   ON c.id = s.category_id
+		  WHERE s.user_id = $1
 		  ORDER BY ul.sort_index NULLS LAST, s.name`, userID)
 	if err != nil {
 		return nil, err
@@ -200,7 +205,7 @@ func (s *Store) ListServices(ctx context.Context, userID string) ([]Service, err
 	for rows.Next() {
 		var sv Service
 		if err := rows.Scan(&sv.ID, &sv.Slug, &sv.Name, &sv.Description, &sv.URL, &sv.Icon, &sv.GatusKey,
-			&sv.CategoryID, &sv.CategoryName); err != nil {
+			&sv.CategoryID, &sv.CategoryName, &sv.SourceLibraryID); err != nil {
 			return nil, err
 		}
 		out = append(out, sv)
@@ -208,18 +213,20 @@ func (s *Store) ListServices(ctx context.Context, userID string) ([]Service, err
 	return out, rows.Err()
 }
 
-// CreateService inserts a catalog entry. An empty GatusKey is stored as NULL.
-func (s *Store) CreateService(ctx context.Context, in Service) (Service, error) {
+// CreateService inserts a catalog entry owned by userID (v9 — per-user). An
+// empty GatusKey is stored as NULL. Slug uniqueness is per-user (§5.2), so two
+// users may each hold the same slug; the same user may not (ErrSlugTaken).
+func (s *Store) CreateService(ctx context.Context, userID string, in Service) (Service, error) {
 	var gatusKey *string
 	if in.GatusKey != "" {
 		gatusKey = &in.GatusKey
 	}
 	var sv Service
 	err := s.pool.QueryRow(ctx,
-		`INSERT INTO services (slug, name, description, url, icon, gatus_key)
-		 VALUES ($1, $2, $3, $4, $5, $6)
+		`INSERT INTO services (user_id, slug, name, description, url, icon, gatus_key)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)
 		 RETURNING id, slug, name, description, url, icon, COALESCE(gatus_key, '')`,
-		in.Slug, in.Name, in.Description, in.URL, in.Icon, gatusKey,
+		userID, in.Slug, in.Name, in.Description, in.URL, in.Icon, gatusKey,
 	).Scan(&sv.ID, &sv.Slug, &sv.Name, &sv.Description, &sv.URL, &sv.Icon, &sv.GatusKey)
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -248,22 +255,23 @@ type ServiceUpdate struct {
 	CategoryID  *string
 }
 
-// UpdateService applies a partial patch and returns the updated row. Returns
-// ErrNotFound when id names no service (including a malformed UUID) and
-// ErrSlugTaken when the new slug collides with another entry.
-func (s *Store) UpdateService(ctx context.Context, id string, in ServiceUpdate) (Service, error) {
+// UpdateService applies a partial patch to userID's OWN service and returns the
+// updated row (v9 — owner-scoped). Returns ErrNotFound when id names no service
+// owned by userID (including a malformed UUID or another user's row → 404, D2)
+// and ErrSlugTaken when the new slug collides with another of the caller's
+// entries.
+func (s *Store) UpdateService(ctx context.Context, id, userID string, in ServiceUpdate) (Service, error) {
 	setGatus := in.GatusKey != nil
 	var gatusKey *string
 	if setGatus && *in.GatusKey != "" {
 		gatusKey = in.GatusKey
 	}
 
-	// Validate an explicit category assignment up front so an unknown (or
-	// malformed) category id is a clean ErrCategoryNotFound — distinct from the
-	// 22P02 the service id itself might raise — and the service is left
-	// untouched. Clearing (SetCategory with nil CategoryID) needs no check.
+	// Validate an explicit category assignment up front: it must name one of
+	// the CALLER's own categories (A7), else ErrCategoryNotFound (→ 400),
+	// distinct from a missing service's 404. Clearing (nil CategoryID) is free.
 	if in.SetCategory && in.CategoryID != nil {
-		if err := s.categoryExists(ctx, *in.CategoryID); err != nil {
+		if err := s.categoryOwnedBy(ctx, *in.CategoryID, userID); err != nil {
 			return Service{}, err
 		}
 	}
@@ -272,24 +280,24 @@ func (s *Store) UpdateService(ctx context.Context, id string, in ServiceUpdate) 
 	err := s.pool.QueryRow(ctx,
 		`WITH updated AS (
 		   UPDATE services SET
-		     slug        = COALESCE($2, slug),
-		     name        = COALESCE($3, name),
-		     description = COALESCE($4, description),
-		     url         = COALESCE($5, url),
-		     icon        = COALESCE($6, icon),
-		     gatus_key   = CASE WHEN $7 THEN $8 ELSE gatus_key END,
-		     category_id = CASE WHEN $9 THEN $10 ELSE category_id END,
+		     slug        = COALESCE($3, slug),
+		     name        = COALESCE($4, name),
+		     description = COALESCE($5, description),
+		     url         = COALESCE($6, url),
+		     icon        = COALESCE($7, icon),
+		     gatus_key   = CASE WHEN $8 THEN $9 ELSE gatus_key END,
+		     category_id = CASE WHEN $10 THEN $11 ELSE category_id END,
 		     updated_at  = now()
-		   WHERE id = $1
-		   RETURNING id, slug, name, description, url, icon, gatus_key, category_id
+		   WHERE id = $1 AND user_id = $2
+		   RETURNING id, slug, name, description, url, icon, gatus_key, category_id, source_library_id
 		 )
 		 SELECT u.id, u.slug, u.name, u.description, u.url, u.icon, COALESCE(u.gatus_key, ''),
-		        u.category_id, c.name
+		        u.category_id, c.name, u.source_library_id
 		   FROM updated u
 		   LEFT JOIN categories c ON c.id = u.category_id`,
-		id, in.Slug, in.Name, in.Description, in.URL, in.Icon, setGatus, gatusKey, in.SetCategory, in.CategoryID,
+		id, userID, in.Slug, in.Name, in.Description, in.URL, in.Icon, setGatus, gatusKey, in.SetCategory, in.CategoryID,
 	).Scan(&sv.ID, &sv.Slug, &sv.Name, &sv.Description, &sv.URL, &sv.Icon, &sv.GatusKey,
-		&sv.CategoryID, &sv.CategoryName)
+		&sv.CategoryID, &sv.CategoryName, &sv.SourceLibraryID)
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) {
 		if pgErr.Code == "23505" {
@@ -308,11 +316,13 @@ func (s *Store) UpdateService(ctx context.Context, id string, in ServiceUpdate) 
 	return sv, nil
 }
 
-// categoryExists returns nil when id names a real category, ErrCategoryNotFound
-// when it does not (including a malformed UUID).
-func (s *Store) categoryExists(ctx context.Context, id string) error {
+// categoryOwnedBy returns nil when id names a category owned by userID,
+// ErrCategoryNotFound otherwise (including a malformed UUID or another user's
+// category — A7). This is the per-user replacement for the v4 global existence
+// check.
+func (s *Store) categoryOwnedBy(ctx context.Context, id, userID string) error {
 	var one int
-	err := s.pool.QueryRow(ctx, `SELECT 1 FROM categories WHERE id = $1`, id).Scan(&one)
+	err := s.pool.QueryRow(ctx, `SELECT 1 FROM categories WHERE id = $1 AND user_id = $2`, id, userID).Scan(&one)
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "22P02" { // malformed UUID
 		return ErrCategoryNotFound
@@ -323,11 +333,27 @@ func (s *Store) categoryExists(ctx context.Context, id string) error {
 	return err
 }
 
-// DeleteService removes a catalog entry. Returns ErrNotFound when id names no
-// service (including a malformed UUID). Favorites and layout rows referencing it
-// are cleaned up by ON DELETE CASCADE.
-func (s *Store) DeleteService(ctx context.Context, id string) error {
-	tag, err := s.pool.Exec(ctx, `DELETE FROM services WHERE id = $1`, id)
+// serviceOwnedBy returns nil when serviceID is owned by userID, ErrNotFound
+// otherwise (malformed UUID, nonexistent, or another user's row → 404, D2). The
+// per-user gate the icon/favorite/layout paths use to keep Invariant 2 tight.
+func (s *Store) serviceOwnedBy(ctx context.Context, serviceID, userID string) error {
+	var one int
+	err := s.pool.QueryRow(ctx, `SELECT 1 FROM services WHERE id = $1 AND user_id = $2`, serviceID, userID).Scan(&one)
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "22P02" { // malformed UUID
+		return ErrNotFound
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
+	return err
+}
+
+// DeleteService removes one of userID's OWN catalog entries (v9 — owner-scoped).
+// Returns ErrNotFound when id names no service owned by userID (malformed UUID,
+// nonexistent, or another user's row → 404, D2). Favorites/layout/icons cascade.
+func (s *Store) DeleteService(ctx context.Context, id, userID string) error {
+	tag, err := s.pool.Exec(ctx, `DELETE FROM services WHERE id = $1 AND user_id = $2`, id, userID)
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "22P02" {
 		return ErrNotFound
@@ -384,10 +410,13 @@ func (s *Store) AllIconFlags(ctx context.Context) (map[string]IconFlags, error) 
 	return out, rows.Err()
 }
 
-// GetIcon returns the stored PNG bytes and ETag for a service's variant.
-// Returns ErrNotFound when that variant has no upload (or id is a malformed
-// UUID — the serving handler treats both as 404).
-func (s *Store) GetIcon(ctx context.Context, serviceID, variant string) (Icon, error) {
+// GetIcon returns the stored PNG bytes and ETag for one of userID's OWN
+// service's variants (v9 — owner-scoped). Returns ErrNotFound when the service
+// is not the caller's (404, D2) or the variant has no upload.
+func (s *Store) GetIcon(ctx context.Context, serviceID, userID, variant string) (Icon, error) {
+	if err := s.serviceOwnedBy(ctx, serviceID, userID); err != nil {
+		return Icon{}, err
+	}
 	var ic Icon
 	err := s.pool.QueryRow(ctx,
 		`SELECT bytes, etag FROM service_icons WHERE service_id = $1 AND variant = $2`,
@@ -406,11 +435,14 @@ func (s *Store) GetIcon(ctx context.Context, serviceID, variant string) (Icon, e
 	return ic, nil
 }
 
-// PutIcon upserts a service's icon variant — the same idempotent operation
-// handles both first upload and replace (PK is (service_id, variant)). Returns
-// ErrNotFound when serviceID does not name a real service (FK violation or
-// malformed UUID).
-func (s *Store) PutIcon(ctx context.Context, serviceID, variant string, bytes []byte, width, height int, etag string) error {
+// PutIcon upserts an icon variant on one of userID's OWN services (v9 —
+// owner-scoped). Returns ErrNotFound when the service is not the caller's (404,
+// D2). The upsert handles both first upload and replace (PK is (service_id,
+// variant)).
+func (s *Store) PutIcon(ctx context.Context, serviceID, userID, variant string, bytes []byte, width, height int, etag string) error {
+	if err := s.serviceOwnedBy(ctx, serviceID, userID); err != nil {
+		return err
+	}
 	_, err := s.pool.Exec(ctx,
 		`INSERT INTO service_icons (service_id, variant, bytes, byte_size, width, height, etag, updated_at)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, now())
@@ -426,9 +458,13 @@ func (s *Store) PutIcon(ctx context.Context, serviceID, variant string, bytes []
 	return err
 }
 
-// DeleteIcon removes a service's icon variant. Idempotent: deleting a variant
-// that isn't set (or a malformed id) succeeds with no effect (spec A11).
-func (s *Store) DeleteIcon(ctx context.Context, serviceID, variant string) error {
+// DeleteIcon removes a variant on one of userID's OWN services (v9 —
+// owner-scoped). Returns ErrNotFound when the service is not the caller's (404,
+// D2). Idempotent for the owner: deleting a variant that isn't set succeeds.
+func (s *Store) DeleteIcon(ctx context.Context, serviceID, userID, variant string) error {
+	if err := s.serviceOwnedBy(ctx, serviceID, userID); err != nil {
+		return err
+	}
 	_, err := s.pool.Exec(ctx,
 		`DELETE FROM service_icons WHERE service_id = $1 AND variant = $2`,
 		serviceID, variant)
@@ -443,6 +479,11 @@ func (s *Store) DeleteIcon(ctx context.Context, serviceID, variant string) error
 // already-favorited service is a no-op. Returns ErrNotFound when serviceID does
 // not name a real service (FK violation or malformed UUID).
 func (s *Store) AddFavorite(ctx context.Context, userID, serviceID string) error {
+	// v9 — a user may only favorite their OWN service; another user's (or a
+	// nonexistent) service → ErrNotFound (404, D2 — Invariant 2).
+	if err := s.serviceOwnedBy(ctx, serviceID, userID); err != nil {
+		return err
+	}
 	_, err := s.pool.Exec(ctx,
 		`INSERT INTO favorites (user_id, service_id) VALUES ($1, $2)
 		 ON CONFLICT DO NOTHING`,
@@ -504,8 +545,12 @@ func (s *Store) SetLayout(ctx context.Context, userID string, orderedIDs []strin
 		return err
 	}
 	for i, id := range orderedIDs {
-		_, err := tx.Exec(ctx,
-			`INSERT INTO user_layout (user_id, service_id, sort_index) VALUES ($1, $2, $3)`,
+		// v9 — only the caller's OWN services may be placed: the INSERT is
+		// guarded on ownership, so a foreign or nonexistent id places 0 rows →
+		// ErrNotFound (404/unchanged, Invariant 2 / A14).
+		tag, err := tx.Exec(ctx,
+			`INSERT INTO user_layout (user_id, service_id, sort_index)
+			 SELECT $1, $2, $3 WHERE EXISTS (SELECT 1 FROM services WHERE id = $2 AND user_id = $1)`,
 			userID, id, i)
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && (pgErr.Code == "23503" || pgErr.Code == "22P02") {
@@ -513,6 +558,9 @@ func (s *Store) SetLayout(ctx context.Context, userID string, orderedIDs []strin
 		}
 		if err != nil {
 			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return ErrNotFound
 		}
 	}
 	return tx.Commit(ctx)

@@ -31,7 +31,8 @@ func validVariant(v string) bool { return v == "light" || v == "dark" }
 // rest of /api/* — the <img> carries the same-site session cookie. 404 when the
 // variant has no upload; honors If-None-Match → 304 (spec A10).
 func (s *server) handleGetIcon(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.currentUser(r); !ok {
+	u, ok := s.currentUser(r)
+	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -41,7 +42,7 @@ func (s *server) handleGetIcon(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ic, err := s.store.GetIcon(r.Context(), r.PathValue("id"), variant)
+	ic, err := s.store.GetIcon(r.Context(), r.PathValue("id"), u.ID, variant)
 	if errors.Is(err, storage.ErrNotFound) {
 		http.Error(w, "no icon for that variant", http.StatusNotFound)
 		return
@@ -63,17 +64,14 @@ func (s *server) handleGetIcon(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(ic.Bytes)
 }
 
-// handlePutIcon stores (creates or replaces) a service's PNG variant. Admin-only
-// (403 otherwise). The raw request body IS the PNG. Validation order: byte size
-// (413) → PNG magic-byte sniff (415) → dimensions (422). 204 on success.
+// handlePutIcon stores (creates or replaces) a PNG variant on one of the
+// caller's OWN services (v9, A5 — no admin gate, owner-scoped: another user's
+// service → 404, D2/A14). The raw request body IS the PNG. Validation order:
+// byte size (413) → PNG magic-byte sniff (415) → dimensions (422). 204 on success.
 func (s *server) handlePutIcon(w http.ResponseWriter, r *http.Request) {
 	u, ok := s.currentUser(r)
 	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-	if u.Role != "admin" {
-		http.Error(w, "admin role required", http.StatusForbidden)
 		return
 	}
 	variant := r.PathValue("variant")
@@ -110,7 +108,7 @@ func (s *server) handlePutIcon(w http.ResponseWriter, r *http.Request) {
 
 	sum := sha256.Sum256(body)
 	etag := hex.EncodeToString(sum[:])
-	err = s.store.PutIcon(r.Context(), r.PathValue("id"), variant, body, cfg.Width, cfg.Height, etag)
+	err = s.store.PutIcon(r.Context(), r.PathValue("id"), u.ID, variant, body, cfg.Width, cfg.Height, etag)
 	if errors.Is(err, storage.ErrNotFound) {
 		http.Error(w, "no such service", http.StatusNotFound)
 		return
@@ -122,16 +120,13 @@ func (s *server) handlePutIcon(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// handleDeleteIcon removes a service's PNG variant. Admin-only (403 otherwise).
-// Idempotent: 204 whether or not bytes existed (spec A11).
+// handleDeleteIcon removes a PNG variant on one of the caller's OWN services
+// (v9, A5 — no admin gate, owner-scoped: another user's service → 404, D2/A14).
+// Idempotent for the owner: 204 whether or not bytes existed (spec A11).
 func (s *server) handleDeleteIcon(w http.ResponseWriter, r *http.Request) {
 	u, ok := s.currentUser(r)
 	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-	if u.Role != "admin" {
-		http.Error(w, "admin role required", http.StatusForbidden)
 		return
 	}
 	variant := r.PathValue("variant")
@@ -140,7 +135,12 @@ func (s *server) handleDeleteIcon(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.store.DeleteIcon(r.Context(), r.PathValue("id"), variant); err != nil {
+	err := s.store.DeleteIcon(r.Context(), r.PathValue("id"), u.ID, variant)
+	if errors.Is(err, storage.ErrNotFound) {
+		http.Error(w, "no such service", http.StatusNotFound)
+		return
+	}
+	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
