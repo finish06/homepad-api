@@ -23,6 +23,9 @@ type serviceView struct {
 	IconDark     bool    `json:"iconDark"`
 	CategoryID   *string `json:"categoryId"`   // null when Uncategorized (v4)
 	CategoryName *string `json:"categoryName"` // null when Uncategorized; denormalized
+	// SourceLibraryID is provenance only (v9, C1): the library offer a copy was
+	// added from, null for a custom app. Additive — never changes behavior.
+	SourceLibraryID *string `json:"sourceLibraryId"`
 }
 
 // handleListServices serves the shared catalog with a live status badge per
@@ -65,22 +68,20 @@ func (s *server) handleListServices(w http.ResponseWriter, r *http.Request) {
 			Favorite:     favs[sv.ID],
 			IconLight:    icons[sv.ID].Light,
 			IconDark:     icons[sv.ID].Dark,
-			CategoryID:   sv.CategoryID,
-			CategoryName: sv.CategoryName,
+			CategoryID:      sv.CategoryID,
+			CategoryName:    sv.CategoryName,
+			SourceLibraryID: sv.SourceLibraryID,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"services": out})
 }
 
-// handleCreateService lets an admin add a catalog entry (A6). Non-admins get 403.
+// handleCreateService creates a service on the caller's OWN dashboard (v9, A4 —
+// no admin gate, per-user). Slug uniqueness is per-user.
 func (s *server) handleCreateService(w http.ResponseWriter, r *http.Request) {
 	u, ok := s.currentUser(r)
 	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-	if u.Role != "admin" {
-		http.Error(w, "admin role required", http.StatusForbidden)
 		return
 	}
 
@@ -104,7 +105,7 @@ func (s *server) handleCreateService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sv, err := s.store.CreateService(r.Context(), storage.Service{
+	sv, err := s.store.CreateService(r.Context(), u.ID, storage.Service{
 		Slug:        in.Slug,
 		Name:        in.Name,
 		Description: in.Description,
@@ -132,16 +133,13 @@ func (s *server) handleCreateService(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleUpdateService lets an admin edit a catalog entry (A6). Non-admins get
-// 403. Body fields are optional — only those present are changed.
+// handleUpdateService edits one of the caller's OWN services (v9, A4 — no admin
+// gate, owner-scoped: another user's id → 404, D2/A14). Body fields are
+// optional — only those present are changed.
 func (s *server) handleUpdateService(w http.ResponseWriter, r *http.Request) {
 	u, ok := s.currentUser(r)
 	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-	if u.Role != "admin" {
-		http.Error(w, "admin role required", http.StatusForbidden)
 		return
 	}
 
@@ -159,7 +157,7 @@ func (s *server) handleUpdateService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sv, err := s.store.UpdateService(r.Context(), r.PathValue("id"), storage.ServiceUpdate{
+	sv, err := s.store.UpdateService(r.Context(), r.PathValue("id"), u.ID, storage.ServiceUpdate{
 		Slug:        in.Slug,
 		Name:        in.Name,
 		Description: in.Description,
@@ -193,9 +191,10 @@ func (s *server) handleUpdateService(w http.ResponseWriter, r *http.Request) {
 		Description:  sv.Description,
 		URL:          sv.URL,
 		Icon:         sv.Icon,
-		Status:       statusFor(s.poller.Snapshot(), sv.GatusKey),
-		CategoryID:   sv.CategoryID,
-		CategoryName: sv.CategoryName,
+		Status:          statusFor(s.poller.Snapshot(), sv.GatusKey),
+		CategoryID:      sv.CategoryID,
+		CategoryName:    sv.CategoryName,
+		SourceLibraryID: sv.SourceLibraryID,
 	})
 }
 
@@ -222,19 +221,16 @@ func (o *optionalString) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// handleDeleteService lets an admin remove a catalog entry (A6). Non-admins get 403.
+// handleDeleteService removes one of the caller's OWN services (v9, A4 — no
+// admin gate, owner-scoped: another user's id → 404, D2/A14).
 func (s *server) handleDeleteService(w http.ResponseWriter, r *http.Request) {
 	u, ok := s.currentUser(r)
 	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	if u.Role != "admin" {
-		http.Error(w, "admin role required", http.StatusForbidden)
-		return
-	}
 
-	err := s.store.DeleteService(r.Context(), r.PathValue("id"))
+	err := s.store.DeleteService(r.Context(), r.PathValue("id"), u.ID)
 	if errors.Is(err, storage.ErrNotFound) {
 		http.Error(w, "no such service", http.StatusNotFound)
 		return

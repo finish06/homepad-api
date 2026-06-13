@@ -8,10 +8,11 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-// ListCategories returns all categories in admin sort_index order (v4).
-func (s *Store) ListCategories(ctx context.Context) ([]Category, error) {
+// ListCategories returns userID's OWN categories in their sort_index order
+// (v9 — per-user, Invariant 2).
+func (s *Store) ListCategories(ctx context.Context, userID string) ([]Category, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, name, sort_index FROM categories ORDER BY sort_index`)
+		`SELECT id, name, sort_index FROM categories WHERE user_id = $1 ORDER BY sort_index`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -28,16 +29,16 @@ func (s *Store) ListCategories(ctx context.Context) ([]Category, error) {
 	return out, rows.Err()
 }
 
-// CreateCategory appends a new category at the end (sort_index = max+1, or 0
-// when first) so creation never disturbs existing order. Returns ErrNameTaken
-// when the name already exists (names are UNIQUE).
-func (s *Store) CreateCategory(ctx context.Context, name string) (Category, error) {
+// CreateCategory appends a new category owned by userID at the end (sort_index =
+// max+1 among the user's categories, or 0 when first). Returns ErrNameTaken when
+// the user already has a category with that name (names are unique per user, D3).
+func (s *Store) CreateCategory(ctx context.Context, userID, name string) (Category, error) {
 	var c Category
 	err := s.pool.QueryRow(ctx,
-		`INSERT INTO categories (name, sort_index)
-		 VALUES ($1, COALESCE((SELECT max(sort_index) + 1 FROM categories), 0))
+		`INSERT INTO categories (user_id, name, sort_index)
+		 VALUES ($1, $2, COALESCE((SELECT max(sort_index) + 1 FROM categories WHERE user_id = $1), 0))
 		 RETURNING id, name, sort_index`,
-		name,
+		userID, name,
 	).Scan(&c.ID, &c.Name, &c.SortIndex)
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -49,14 +50,16 @@ func (s *Store) CreateCategory(ctx context.Context, name string) (Category, erro
 	return c, nil
 }
 
-// RenameCategory updates a category's name. Returns ErrNotFound when id names no
-// category (including a malformed UUID) and ErrNameTaken on a name collision.
-func (s *Store) RenameCategory(ctx context.Context, id, name string) (Category, error) {
+// RenameCategory renames one of userID's OWN categories (v9 — owner-scoped).
+// Returns ErrNotFound when id names no category owned by userID (malformed UUID,
+// nonexistent, or another user's row → 404, D2) and ErrNameTaken on a per-user
+// name collision.
+func (s *Store) RenameCategory(ctx context.Context, id, userID, name string) (Category, error) {
 	var c Category
 	err := s.pool.QueryRow(ctx,
-		`UPDATE categories SET name = $2 WHERE id = $1
+		`UPDATE categories SET name = $3 WHERE id = $1 AND user_id = $2
 		 RETURNING id, name, sort_index`,
-		id, name,
+		id, userID, name,
 	).Scan(&c.ID, &c.Name, &c.SortIndex)
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) {
@@ -76,10 +79,11 @@ func (s *Store) RenameCategory(ctx context.Context, id, name string) (Category, 
 	return c, nil
 }
 
-// SetCategoryOrder rewrites every category's sort_index from orderedIDs by
-// position (whole-array reindex, like SetLayout), in one transaction so a
-// failure leaves the prior order intact. A malformed id → ErrNotFound.
-func (s *Store) SetCategoryOrder(ctx context.Context, orderedIDs []string) error {
+// SetCategoryOrder rewrites the sort_index of userID's OWN categories from
+// orderedIDs by position (v9 — owner-scoped), in one transaction. An id naming
+// no category owned by userID (foreign or nonexistent) → ErrNotFound; the prior
+// order is left intact (A14).
+func (s *Store) SetCategoryOrder(ctx context.Context, userID string, orderedIDs []string) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -87,7 +91,7 @@ func (s *Store) SetCategoryOrder(ctx context.Context, orderedIDs []string) error
 	defer tx.Rollback(ctx)
 
 	for i, id := range orderedIDs {
-		_, err := tx.Exec(ctx, `UPDATE categories SET sort_index = $2 WHERE id = $1`, id, i)
+		tag, err := tx.Exec(ctx, `UPDATE categories SET sort_index = $3 WHERE id = $1 AND user_id = $2`, id, userID, i)
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "22P02" { // malformed UUID
 			return ErrNotFound
@@ -95,15 +99,20 @@ func (s *Store) SetCategoryOrder(ctx context.Context, orderedIDs []string) error
 		if err != nil {
 			return err
 		}
+		if tag.RowsAffected() == 0 {
+			return ErrNotFound
+		}
 	}
 	return tx.Commit(ctx)
 }
 
-// DeleteCategory removes a category. Idempotent: deleting an absent category (or
-// a malformed id) succeeds with no effect. The services FK is ON DELETE SET
-// NULL, so the category's apps fall back to Uncategorized — none are deleted.
-func (s *Store) DeleteCategory(ctx context.Context, id string) error {
-	_, err := s.pool.Exec(ctx, `DELETE FROM categories WHERE id = $1`, id)
+// DeleteCategory removes one of userID's OWN categories (v9 — owner-scoped).
+// Idempotent for the owner: deleting an absent (or malformed) id succeeds with
+// no effect. Another user's category is never touched (Invariant 2). The
+// services FK is ON DELETE SET NULL, so the category's apps fall to
+// Uncategorized — none deleted.
+func (s *Store) DeleteCategory(ctx context.Context, id, userID string) error {
+	_, err := s.pool.Exec(ctx, `DELETE FROM categories WHERE id = $1 AND user_id = $2`, id, userID)
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "22P02" { // malformed UUID: nothing to delete
 		return nil
