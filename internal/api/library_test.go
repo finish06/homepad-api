@@ -126,3 +126,193 @@ func TestAnyUserCanBrowseLibrary_Ordered(t *testing.T) {
 		assert.False(t, o.Added, "no copies held yet → added=false")
 	}
 }
+
+// addedService is the serviceView returned/listed for an add-from-library copy
+// (the fields v9.2 asserts on).
+type addedService struct {
+	ID              string  `json:"id"`
+	Slug            string  `json:"slug"`
+	Name            string  `json:"name"`
+	Description     string  `json:"description"`
+	URL             string  `json:"url"`
+	Icon            string  `json:"icon"`
+	CategoryID      *string `json:"categoryId"`
+	SourceLibraryID *string `json:"sourceLibraryId"`
+}
+
+func addFromLibrary(t *testing.T, baseURL, token, offerID string, body any) *http.Response {
+	t.Helper()
+	return doJSON(t, http.MethodPost, baseURL+"/api/library/"+offerID+"/add", token, body)
+}
+
+func decodeService(t *testing.T, resp *http.Response) addedService {
+	t.Helper()
+	defer resp.Body.Close()
+	var sv addedService
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&sv))
+	return sv
+}
+
+func getServicesWithSource(t *testing.T, baseURL, token string) []addedService {
+	t.Helper()
+	resp := doJSON(t, http.MethodGet, baseURL+"/api/services", token, nil)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	var payload struct {
+		Services []addedService `json:"services"`
+	}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&payload))
+	return payload.Services
+}
+
+// A10 — POST /api/library/{id}/add copies the offer into a new services row
+// owned by the caller (fields copied, source_library_id set, slug derived &
+// unique), returns the serviceView, and the app appears in GET /api/services;
+// a second GET /api/library shows added=true for that offer only.
+func TestAddFromLibrary_CopiesOfferOntoCallerDashboard(t *testing.T) {
+	s := testsupport.NewServer(t)
+	defer s.Close()
+
+	offer := createOffer(t, s.URL, "admin-session", "Plex", "https://plex.example.com")
+	other := createOffer(t, s.URL, "admin-session", "Sonarr", "https://sonarr.example.com")
+
+	resp := addFromLibrary(t, s.URL, "non-admin-session", offer.ID, nil)
+	require.Equal(t, http.StatusCreated, resp.StatusCode, "add must return 201")
+	sv := decodeService(t, resp)
+	assert.Equal(t, "Plex", sv.Name)
+	assert.Equal(t, offer.URL, sv.URL)
+	assert.Equal(t, offer.Icon, sv.Icon)
+	assert.Equal(t, offer.Description, sv.Description)
+	assert.Equal(t, "plex", sv.Slug, "slug derived from name")
+	require.NotNil(t, sv.SourceLibraryID)
+	assert.Equal(t, offer.ID, *sv.SourceLibraryID, "provenance set")
+
+	// The copy is now on the caller's dashboard.
+	found := false
+	for _, x := range getServicesWithSource(t, s.URL, "non-admin-session") {
+		if x.ID == sv.ID {
+			found = true
+			require.NotNil(t, x.SourceLibraryID)
+			assert.Equal(t, offer.ID, *x.SourceLibraryID)
+		}
+	}
+	assert.True(t, found, "added copy appears in GET /api/services")
+
+	// added flag: true for the added offer only.
+	for _, o := range getLibrary(t, s.URL, "non-admin-session") {
+		if o.ID == offer.ID {
+			assert.True(t, o.Added, "added offer → added=true")
+		}
+		if o.ID == other.ID {
+			assert.False(t, o.Added, "un-added offer → added=false")
+		}
+	}
+}
+
+// A11 — add lands Uncategorized by default (D4); a valid own categoryId files
+// it there; another user's / nonexistent categoryId → 400.
+func TestAddFromLibrary_CategoryRules(t *testing.T) {
+	s := testsupport.NewServer(t)
+	defer s.Close()
+
+	offer := createOffer(t, s.URL, "admin-session", "Jellyfin", "https://jellyfin.example.com")
+
+	// default → Uncategorized
+	sv := decodeService(t, addFromLibrary(t, s.URL, "non-admin-session", offer.ID, nil))
+	assert.Nil(t, sv.CategoryID, "no body → Uncategorized")
+
+	// own category → filed there
+	mine := createCategory(t, s.URL, "non-admin-session", "MyMedia")
+	sv2 := decodeService(t, addFromLibrary(t, s.URL, "non-admin-session", offer.ID, map[string]any{"categoryId": mine.ID}))
+	require.NotNil(t, sv2.CategoryID)
+	assert.Equal(t, mine.ID, *sv2.CategoryID)
+
+	// another user's category → 400
+	foreign := createCategory(t, s.URL, "admin-session", "AdminMedia")
+	r3 := addFromLibrary(t, s.URL, "non-admin-session", offer.ID, map[string]any{"categoryId": foreign.ID})
+	assert.Equal(t, http.StatusBadRequest, r3.StatusCode, "foreign category → 400")
+	r3.Body.Close()
+
+	// nonexistent category → 400
+	r4 := addFromLibrary(t, s.URL, "non-admin-session", offer.ID, map[string]any{"categoryId": "00000000-0000-0000-0000-000000000000"})
+	assert.Equal(t, http.StatusBadRequest, r4.StatusCode, "nonexistent category → 400")
+	r4.Body.Close()
+}
+
+// A12 — editing an offer does NOT propagate to existing copies (C1); deleting
+// an offer leaves copies intact with source_library_id nulled (C1/OQ5).
+func TestLibraryEditDelete_DoesNotTouchCopies(t *testing.T) {
+	s := testsupport.NewServer(t)
+	defer s.Close()
+
+	offer := createOffer(t, s.URL, "admin-session", "Vaultwarden", "https://vw.example.com")
+	copy := decodeService(t, addFromLibrary(t, s.URL, "non-admin-session", offer.ID, nil))
+
+	// admin edits the offer
+	patch := doJSON(t, http.MethodPatch, s.URL+"/api/library/"+offer.ID, "admin-session",
+		map[string]any{"name": "CHANGED", "url": "https://changed.example.com"})
+	require.Equal(t, http.StatusOK, patch.StatusCode)
+	patch.Body.Close()
+
+	// the copy is unchanged, still pointing at the offer
+	var got addedService
+	for _, x := range getServicesWithSource(t, s.URL, "non-admin-session") {
+		if x.ID == copy.ID {
+			got = x
+		}
+	}
+	require.Equal(t, copy.ID, got.ID, "copy still present after edit")
+	assert.Equal(t, "Vaultwarden", got.Name, "edit did not propagate to copy")
+	assert.Equal(t, offer.URL, got.URL)
+	require.NotNil(t, got.SourceLibraryID)
+	assert.Equal(t, offer.ID, *got.SourceLibraryID)
+
+	// admin deletes the offer
+	del := doJSON(t, http.MethodDelete, s.URL+"/api/library/"+offer.ID, "admin-session", nil)
+	require.Equal(t, http.StatusNoContent, del.StatusCode)
+	del.Body.Close()
+
+	// copy still present; provenance nulled
+	var after addedService
+	present := false
+	for _, x := range getServicesWithSource(t, s.URL, "non-admin-session") {
+		if x.ID == copy.ID {
+			after = x
+			present = true
+		}
+	}
+	assert.True(t, present, "copy survives offer deletion")
+	assert.Nil(t, after.SourceLibraryID, "deleting offer nulls source_library_id (FK)")
+}
+
+// A13 — adding the same offer twice yields two independent copies (no
+// server-side dedupe, D6); both are deletable.
+func TestAddFromLibrary_TwiceYieldsTwoCopies(t *testing.T) {
+	s := testsupport.NewServer(t)
+	defer s.Close()
+
+	offer := createOffer(t, s.URL, "admin-session", "Radarr", "https://radarr.example.com")
+
+	c1 := decodeService(t, addFromLibrary(t, s.URL, "non-admin-session", offer.ID, nil))
+	c2 := decodeService(t, addFromLibrary(t, s.URL, "non-admin-session", offer.ID, nil))
+	assert.NotEqual(t, c1.ID, c2.ID, "two distinct copies")
+	assert.NotEqual(t, c1.Slug, c2.Slug, "second copy gets a unique slug")
+	require.NotNil(t, c1.SourceLibraryID)
+	require.NotNil(t, c2.SourceLibraryID)
+	assert.Equal(t, offer.ID, *c1.SourceLibraryID)
+	assert.Equal(t, offer.ID, *c2.SourceLibraryID)
+
+	count := 0
+	for _, x := range getServicesWithSource(t, s.URL, "non-admin-session") {
+		if x.SourceLibraryID != nil && *x.SourceLibraryID == offer.ID {
+			count++
+		}
+	}
+	assert.Equal(t, 2, count, "both copies present — no dedupe")
+
+	for _, id := range []string{c1.ID, c2.ID} {
+		del := doJSON(t, http.MethodDelete, s.URL+"/api/services/"+id, "non-admin-session", nil)
+		assert.Equal(t, http.StatusNoContent, del.StatusCode, "each copy is independently deletable")
+		del.Body.Close()
+	}
+}
