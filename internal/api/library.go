@@ -170,6 +170,56 @@ func (s *server) handleSetLibraryOrder(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// handleAddFromLibrary copies an offer onto the CALLER's own dashboard (A10) and
+// returns the new serviceView. Any authenticated user may add (never 401/403 for
+// a valid session). Optional categoryId must be the caller's own (A11) else 400;
+// absent/null lands Uncategorized (D4). Unknown offer id → 404. Adding twice is
+// allowed and makes a second copy (D6).
+func (s *server) handleAddFromLibrary(w http.ResponseWriter, r *http.Request) {
+	u, ok := s.currentUser(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	var in struct {
+		CategoryID *string `json:"categoryId"`
+	}
+	// An empty body is valid (Uncategorized). Only reject malformed JSON.
+	if r.ContentLength != 0 {
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			http.Error(w, "invalid JSON body", http.StatusBadRequest)
+			return
+		}
+	}
+
+	sv, err := s.store.AddFromLibrary(r.Context(), u.ID, r.PathValue("id"), in.CategoryID)
+	if errors.Is(err, storage.ErrCategoryNotFound) {
+		http.Error(w, "no such category", http.StatusBadRequest)
+		return
+	}
+	if errors.Is(err, storage.ErrNotFound) {
+		http.Error(w, "no such library offer", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, serviceView{
+		ID:              sv.ID,
+		Slug:            sv.Slug,
+		Name:            sv.Name,
+		Description:     sv.Description,
+		URL:             sv.URL,
+		Icon:            sv.Icon,
+		Status:          statusFor(s.poller.Snapshot(), sv.GatusKey),
+		CategoryID:      sv.CategoryID,
+		CategoryName:    sv.CategoryName,
+		SourceLibraryID: sv.SourceLibraryID,
+	})
+}
+
 // handleDeleteLibraryApp removes an offer (admin only, A8). Idempotent. Existing
 // copies are untouched; their source_library_id goes NULL via the FK (C1/OQ5).
 func (s *server) handleDeleteLibraryApp(w http.ResponseWriter, r *http.Request) {

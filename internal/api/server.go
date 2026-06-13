@@ -80,6 +80,7 @@ func New(d Deps) http.Handler {
 		mux.HandleFunc("PUT /api/library/order", s.handleSetLibraryOrder)
 		mux.HandleFunc("PATCH /api/library/{id}", s.handleUpdateLibraryApp)
 		mux.HandleFunc("DELETE /api/library/{id}", s.handleDeleteLibraryApp)
+		mux.HandleFunc("POST /api/library/{id}/add", s.handleAddFromLibrary)
 		mux.HandleFunc("PUT /api/layout", s.handleUpdateLayout)
 		mux.HandleFunc("GET /api/status", s.handleStatus)
 		mux.HandleFunc("GET /health", s.handleHealth)
@@ -96,7 +97,7 @@ func New(d Deps) http.Handler {
 			mux.HandleFunc("GET /api/auth/oidc/callback", s.handleOIDCCallback)
 		}
 	} else {
-		for _, p := range []string{"POST /api/register", "POST /api/login", "POST /api/logout", "GET /api/me", "PATCH /api/me", "GET /api/me/collapsed-categories", "PUT /api/me/collapsed-categories", "GET /api/services", "POST /api/services", "PATCH /api/services/{id}", "DELETE /api/services/{id}", "GET /api/categories", "POST /api/categories", "PUT /api/categories/order", "PATCH /api/categories/{id}", "DELETE /api/categories/{id}", "GET /api/services/{id}/icon/{variant}", "PUT /api/services/{id}/icon/{variant}", "DELETE /api/services/{id}/icon/{variant}", "POST /api/favorites/{id}", "DELETE /api/favorites/{id}", "GET /api/library", "POST /api/library", "PUT /api/library/order", "PATCH /api/library/{id}", "DELETE /api/library/{id}", "PUT /api/layout", "GET /api/status", "GET /health"} {
+		for _, p := range []string{"POST /api/register", "POST /api/login", "POST /api/logout", "GET /api/me", "PATCH /api/me", "GET /api/me/collapsed-categories", "PUT /api/me/collapsed-categories", "GET /api/services", "POST /api/services", "PATCH /api/services/{id}", "DELETE /api/services/{id}", "GET /api/categories", "POST /api/categories", "PUT /api/categories/order", "PATCH /api/categories/{id}", "DELETE /api/categories/{id}", "GET /api/services/{id}/icon/{variant}", "PUT /api/services/{id}/icon/{variant}", "DELETE /api/services/{id}/icon/{variant}", "POST /api/favorites/{id}", "DELETE /api/favorites/{id}", "GET /api/library", "POST /api/library", "PUT /api/library/order", "PATCH /api/library/{id}", "DELETE /api/library/{id}", "POST /api/library/{id}/add", "PUT /api/layout", "GET /api/status", "GET /health"} {
 			mux.HandleFunc(p, notImplemented)
 		}
 	}
