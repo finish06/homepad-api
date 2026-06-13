@@ -103,22 +103,45 @@ func TestAdminUploadAndServeIcons(t *testing.T) {
 	}
 }
 
-// A4 — non-admin gets 403 on PUT and DELETE of any variant.
-func TestNonAdminCannotMutateIcons(t *testing.T) {
+// v9 (A5) — the v6 admin gate on icon mutation is GONE: a non-admin manages the
+// icons on their OWN service. PUT/DELETE of a variant on the caller's own
+// service succeed (no 403); cross-user 404 is covered in isolation_test.go (A14).
+// This is the icons slice of the updated v6 cross-cutting admin-gate test (D10).
+func TestUserCanMutateOwnIcons_A5(t *testing.T) {
 	s := testsupport.NewServer(t)
 	defer s.Close()
+	// non-admin-session owns its OWN seeded gitea/grafana services.
 	id := firstServiceID(t, s.URL, "non-admin-session")
 
 	resp := putIcon(t, s.URL, "non-admin-session", id, "light", pngBytes(t, 32, 32))
-	assert.Equal(t, http.StatusForbidden, resp.StatusCode, "non-admin PUT must be 403")
+	require.Equal(t, http.StatusNoContent, resp.StatusCode, "v9: non-admin PUT of own service icon → 204")
 	resp.Body.Close()
+
+	// The flag surfaces on the caller's own list (A5 — scoped to that service).
+	listReq, _ := http.NewRequest(http.MethodGet, s.URL+"/api/services", nil)
+	listReq.AddCookie(&http.Cookie{Name: "homepad_session", Value: "non-admin-session"})
+	lr, err := http.DefaultClient.Do(listReq)
+	require.NoError(t, err)
+	var payload struct {
+		Services []struct {
+			ID        string `json:"id"`
+			IconLight bool   `json:"iconLight"`
+		} `json:"services"`
+	}
+	require.NoError(t, json.NewDecoder(lr.Body).Decode(&payload))
+	lr.Body.Close()
+	for _, sv := range payload.Services {
+		if sv.ID == id {
+			assert.True(t, sv.IconLight, "iconLight true after the owner uploads")
+		}
+	}
 
 	del, _ := http.NewRequest(http.MethodDelete, s.URL+"/api/services/"+id+"/icon/light", nil)
 	del.AddCookie(&http.Cookie{Name: "homepad_session", Value: "non-admin-session"})
 	dr, err := http.DefaultClient.Do(del)
 	require.NoError(t, err)
 	defer dr.Body.Close()
-	assert.Equal(t, http.StatusForbidden, dr.StatusCode, "non-admin DELETE must be 403")
+	assert.Equal(t, http.StatusNoContent, dr.StatusCode, "v9: non-admin DELETE of own service icon → 204")
 }
 
 // A5 — JPEG bytes labeled image/png are rejected by magic-byte sniff with 415,

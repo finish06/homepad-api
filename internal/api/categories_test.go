@@ -97,33 +97,60 @@ func TestAdminCanCreateCategory_AndDuplicate409(t *testing.T) {
 	assert.Equal(t, http.StatusConflict, dup.StatusCode, "duplicate category name must be 409")
 }
 
-// A2 — a non-admin gets 403 on every mutating verb (create/rename/reorder/delete)
-// and on assigning a service's category.
-func TestNonAdmin_403_OnEveryCategoryMutation(t *testing.T) {
+// v9 (A4) — the admin gate on categories is GONE: a non-admin manages their OWN
+// categories. Each mutating verb succeeds on the caller's own rows. (Cross-user
+// 404 is covered in isolation_test.go, A14.)
+func TestUserCanMutateOwnCategories_A4(t *testing.T) {
 	s := testsupport.NewServer(t)
 	defer s.Close()
 
-	// Seed a real category + service as admin for the rename/reorder/delete/assign attempts.
-	cat := createCategory(t, s.URL, "admin-session", "Media")
-	svc := getServicesFull(t, s.URL, "admin-session")[0]
+	// create (own)
+	cat := createCategory(t, s.URL, "non-admin-session", "My Media")
+	assert.Equal(t, "My Media", cat.Name)
 
-	cases := []struct {
-		name   string
-		method string
-		path   string
-		body   any
-	}{
-		{"create", http.MethodPost, "/api/categories", map[string]any{"name": "Infra"}},
-		{"rename", http.MethodPatch, "/api/categories/" + cat.ID, map[string]any{"name": "Infra"}},
-		{"reorder", http.MethodPut, "/api/categories/order", map[string]any{"order": []string{cat.ID}}},
-		{"delete", http.MethodDelete, "/api/categories/" + cat.ID, nil},
-		{"assign", http.MethodPatch, "/api/services/" + svc.ID, map[string]any{"categoryId": cat.ID}},
-	}
-	for _, tc := range cases {
-		resp := doJSON(t, tc.method, s.URL+tc.path, "non-admin-session", tc.body)
-		resp.Body.Close()
-		assert.Equal(t, http.StatusForbidden, resp.StatusCode,
-			"non-admin %s must return 403", tc.name)
+	// rename (own) → 200
+	resp := doJSON(t, http.MethodPatch, s.URL+"/api/categories/"+cat.ID, "non-admin-session", map[string]any{"name": "My Tools"})
+	resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode, "rename own category → 200")
+
+	// reorder (own) → 204
+	resp = doJSON(t, http.MethodPut, s.URL+"/api/categories/order", "non-admin-session", map[string]any{"order": []string{cat.ID}})
+	resp.Body.Close()
+	assert.Equal(t, http.StatusNoContent, resp.StatusCode, "reorder own categories → 204")
+
+	// assign own service to own category → 200
+	svc := getServicesFull(t, s.URL, "non-admin-session")[0]
+	resp = doJSON(t, http.MethodPatch, s.URL+"/api/services/"+svc.ID, "non-admin-session", map[string]any{"categoryId": cat.ID})
+	resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode, "assign own service to own category → 200")
+
+	// delete (own) → 204
+	resp = doJSON(t, http.MethodDelete, s.URL+"/api/categories/"+cat.ID, "non-admin-session", nil)
+	resp.Body.Close()
+	assert.Equal(t, http.StatusNoContent, resp.StatusCode, "delete own category → 204")
+}
+
+// A7 — a user may assign a service only to their OWN category; another user's
+// (or a nonexistent) category → 400, service unchanged.
+func TestAssignForeignCategory_400_A7(t *testing.T) {
+	s := testsupport.NewServer(t)
+	defer s.Close()
+
+	// admin owns a category; the non-admin must not be able to file their own
+	// service into it.
+	adminCat := createCategory(t, s.URL, "admin-session", "Admin Media")
+	userSvc := getServicesFull(t, s.URL, "non-admin-session")[0]
+
+	resp := doJSON(t, http.MethodPatch, s.URL+"/api/services/"+userSvc.ID, "non-admin-session", map[string]any{"categoryId": adminCat.ID})
+	resp.Body.Close()
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode, "assigning another user's category → 400")
+
+	// The user's service is unchanged (still Uncategorized).
+	after := getServicesFull(t, s.URL, "non-admin-session")
+	for _, sv := range after {
+		if sv.ID == userSvc.ID {
+			assert.Nil(t, sv.CategoryID, "a rejected foreign-category assignment leaves the service Uncategorized")
+		}
 	}
 }
 
