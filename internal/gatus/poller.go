@@ -15,11 +15,25 @@ const (
 	StatusUnknown  = "UNKNOWN"
 )
 
+// CheckResult is a single historical Gatus check, preserved so the frontend can
+// render an uptime sparkline. Oldest-first within EndpointStatus.Results.
+type CheckResult struct {
+	Success   bool
+	Timestamp time.Time
+}
+
 type EndpointStatus struct {
 	Key          string
 	Status       string
 	LastResultAt time.Time
+	// Results is the recent check history (≤20, oldest-first) for the sparkline.
+	// Empty when Gatus has no results for the endpoint.
+	Results []CheckResult
 }
+
+// maxResults caps the surfaced history per endpoint, matching Gatus's default
+// retention and the sparkline's 20-dot strip.
+const maxResults = 20
 
 type Snapshot struct {
 	AsOf     time.Time
@@ -70,6 +84,17 @@ func (c *Client) FetchAll(ctx context.Context) ([]EndpointStatus, error) {
 				es.Status = StatusUp
 			} else {
 				es.Status = StatusDown
+			}
+			// Surface the recent history for the sparkline. Gatus returns
+			// results oldest-first (the last entry is the current check, used
+			// for Status above), so keep that order; take the most recent 20.
+			start := 0
+			if n > maxResults {
+				start = n - maxResults
+			}
+			es.Results = make([]CheckResult, 0, n-start)
+			for _, r := range e.Results[start:] {
+				es.Results = append(es.Results, CheckResult{Success: r.Success, Timestamp: r.Timestamp})
 			}
 		}
 		out = append(out, es)
