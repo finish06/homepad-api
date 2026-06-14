@@ -55,3 +55,33 @@ func TestServicesEndpoint_GatusBlackhole_AllUnknown(t *testing.T) {
 			"with Gatus unreachable, all services must report UNKNOWN (service id=%s)", svc.ID)
 	}
 }
+
+// AC-009 — /api/services is additive: every service object carries an
+// uptimeChecks array. With Gatus unreachable (no snapshot data), it is present
+// and empty (never null, never absent) so clients render no sparkline.
+func TestServicesEndpoint_UptimeChecksPresentAndEmpty(t *testing.T) {
+	s := testsupport.NewServer(t)
+	defer s.Close()
+
+	req, _ := http.NewRequest(http.MethodGet, s.URL+"/api/services", nil)
+	req.AddCookie(&http.Cookie{Name: "homepad_session", Value: "any-user"})
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	// Decode into a map so a missing "uptimeChecks" key is distinguishable from
+	// an empty array.
+	var payload struct {
+		Services []map[string]json.RawMessage `json:"services"`
+	}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&payload))
+	require.NotEmpty(t, payload.Services, "expected seeded services in the catalog")
+
+	for _, svc := range payload.Services {
+		raw, ok := svc["uptimeChecks"]
+		require.True(t, ok, "each service must carry an uptimeChecks field (AC-009)")
+		assert.JSONEq(t, "[]", string(raw),
+			"with no Gatus data uptimeChecks must be [] (not null/absent); got %s", raw)
+	}
+}

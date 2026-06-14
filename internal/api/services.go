@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/gatus"
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/storage"
@@ -26,6 +27,16 @@ type serviceView struct {
 	// SourceLibraryID is provenance only (v9, C1): the library offer a copy was
 	// added from, null for a custom app. Additive — never changes behavior.
 	SourceLibraryID *string `json:"sourceLibraryId"`
+	// UptimeChecks is the recent Gatus history (≤20, oldest-first) backing the
+	// tile sparkline. Always present; [] when the service has no gatus_key or no
+	// cached results. Additive — clients ignoring it are unaffected.
+	UptimeChecks []checkResultView `json:"uptimeChecks"`
+}
+
+// checkResultView is the wire form of one historical Gatus check.
+type checkResultView struct {
+	Success   bool      `json:"success"`
+	Timestamp time.Time `json:"timestamp"`
 }
 
 // handleListServices serves the shared catalog with a live status badge per
@@ -71,6 +82,7 @@ func (s *server) handleListServices(w http.ResponseWriter, r *http.Request) {
 			CategoryID:      sv.CategoryID,
 			CategoryName:    sv.CategoryName,
 			SourceLibraryID: sv.SourceLibraryID,
+			UptimeChecks:    uptimeChecksFor(snap, sv.GatusKey),
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"services": out})
@@ -267,4 +279,22 @@ func statusFor(snap gatus.Snapshot, gatusKey string) string {
 		return st.Status
 	}
 	return gatus.StatusUnknown
+}
+
+// uptimeChecksFor maps a service's cached Gatus history to the wire view. It
+// always returns a non-nil slice so the JSON field is [] (never null): no
+// gatus_key, or no cached results for it (e.g. Gatus unreachable), yields [].
+func uptimeChecksFor(snap gatus.Snapshot, gatusKey string) []checkResultView {
+	out := []checkResultView{}
+	if gatusKey == "" {
+		return out
+	}
+	st, ok := snap.Statuses[gatusKey]
+	if !ok {
+		return out
+	}
+	for _, r := range st.Results {
+		out = append(out, checkResultView{Success: r.Success, Timestamp: r.Timestamp})
+	}
+	return out
 }
