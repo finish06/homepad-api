@@ -269,11 +269,12 @@ func (s *server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"as_of": snap.AsOf, "statuses": statuses})
 }
 
-// statusFor resolves a service's badge from the snapshot. No gatus_key, or no
-// cached result for it (e.g. Gatus unreachable), resolves to UNKNOWN.
+// statusFor resolves a service's badge from the snapshot. An empty gatus_key
+// means monitoring was never wired → NOT_MONITORED. A key that IS set but has no
+// cached result (e.g. Gatus unreachable) is a monitoring failure → UNKNOWN.
 func statusFor(snap gatus.Snapshot, gatusKey string) string {
 	if gatusKey == "" {
-		return gatus.StatusUnknown
+		return gatus.StatusNotMonitored
 	}
 	if st, ok := snap.Statuses[gatusKey]; ok {
 		return st.Status
