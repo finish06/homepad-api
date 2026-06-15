@@ -13,6 +13,9 @@ const (
 	StatusDown     = "DOWN"
 	StatusDegraded = "DEGRADED"
 	StatusUnknown  = "UNKNOWN"
+	// StatusNotMonitored is homepad-api's own sentinel for a service with no
+	// gatus_key (monitoring never wired). Gatus never produces it.
+	StatusNotMonitored = "NOT_MONITORED"
 )
 
 // CheckResult is a single historical Gatus check, preserved so the frontend can
