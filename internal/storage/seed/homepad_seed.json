@@ -310,5 +310,53 @@
     "description": "kube",
     "icon": "",
     "gatus_key": "kube_joe-learns-frontend"
+  },
+  {
+    "name": "Fleet Feed",
+    "slug": "fleetfeed",
+    "url": "https://fleet-feed.kube.calebdunn.tech",
+    "description": "Friends",
+    "icon": "",
+    "gatus_key": ""
+  },
+  {
+    "name": "Stitch",
+    "slug": "stitchtty",
+    "url": "https://stitch.kube.calebdunn.tech",
+    "description": "Friends",
+    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/terminal.png",
+    "gatus_key": ""
+  },
+  {
+    "name": "Gracie",
+    "slug": "gracietty",
+    "url": "https://gracie.kube.calebdunn.tech",
+    "description": "Friends",
+    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/terminal.png",
+    "gatus_key": ""
+  },
+  {
+    "name": "Walt",
+    "slug": "walttty",
+    "url": "https://walt.kube.calebdunn.tech",
+    "description": "Friends",
+    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/terminal.png",
+    "gatus_key": ""
+  },
+  {
+    "name": "Ada",
+    "slug": "adatty",
+    "url": "https://ada.kube.calebdunn.tech",
+    "description": "Friends",
+    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/terminal.png",
+    "gatus_key": ""
+  },
+  {
+    "name": "Murph",
+    "slug": "murphtty",
+    "url": "https://murph.kube.calebdunn.tech",
+    "description": "Friends",
+    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/terminal.png",
+    "gatus_key": ""
   }
 ]
