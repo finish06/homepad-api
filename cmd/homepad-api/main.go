@@ -33,6 +33,15 @@ func main() {
 	}
 	log.Println("migrations applied")
 
+	// homepad-db is ephemeral (emptyDir) in prod, so a pod restart wipes the
+	// catalog. Self-heal: seed the App Library from the committed catalog when
+	// it is empty. Idempotent — a no-op once any offer exists.
+	if seeded, err := store.SeedLibraryIfEmpty(ctx); err != nil {
+		log.Fatalf("seed library: %v", err)
+	} else if seeded > 0 {
+		log.Printf("seeded App Library with %d catalog offers (was empty)", seeded)
+	}
+
 	poller := gatus.NewPoller(gatus.NewClient(os.Getenv("GATUS_BASE_URL")), 30*time.Second)
 	go func() {
 		if err := poller.Run(ctx); err != nil && err != context.Canceled {
