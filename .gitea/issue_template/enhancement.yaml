@@ -1,0 +1,58 @@
+name: Enhancement Request
+about: Propose a new feature or improvement
+title: "[Enhancement]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the idea. Enhancements are triaged by Walt (product) and are
+        exempt from the 2-day bug-close SLA — they stay open until scheduled or
+        declined.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: One or two sentences — what do you want?
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / motivation
+      description: What problem does this solve? Who's affected, and how is it handled today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: How might it work? Rough is fine — Walt will spec the detail.
+    validations:
+      required: false
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: How do we know it's done? Bullet points.
+    validations:
+      required: false
+  - type: input
+    id: area
+    attributes:
+      label: Affected project / area
+      description: e.g. homepad, fleet-feed, cluster/platform
+    validations:
+      required: false
+  - type: dropdown
+    id: size
+    attributes:
+      label: Rough size
+      options:
+        - Not sure
+        - Small (hours)
+        - Medium (days)
+        - Large (multi-cycle)
+    validations:
+      required: false
