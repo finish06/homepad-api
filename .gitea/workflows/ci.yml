@@ -33,24 +33,4 @@ jobs:
       # don't race on the shared Postgres (each package truncates the catalog).
       - run: go test ./... -count=1 -p 1
 
-  build-and-push:
-    name: Build & push image
-    needs: backend
-    # Only on a merge/push to main — not on PRs or feature branches.
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Short commit SHA
-        id: sha
-        run: echo "short=$(echo "${{ github.sha }}" | cut -c1-7)" >> "$GITHUB_OUTPUT"
-      - name: Registry login
-        run: docker login dockerhub.calebdunn.tech -u ${{ secrets.REGISTRY_USERNAME }} -p ${{ secrets.REGISTRY_PASSWORD }}
-      - name: Build image
-        run: docker build -t dockerhub.calebdunn.tech/homepad-api:${{ steps.sha.outputs.short }} -t dockerhub.calebdunn.tech/homepad-api:latest .
-      - name: Push image
-        run: |
-          docker push dockerhub.calebdunn.tech/homepad-api:${{ steps.sha.outputs.short }}
-          docker push dockerhub.calebdunn.tech/homepad-api:latest
-
 # ci: trigger run 031226

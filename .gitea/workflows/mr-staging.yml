@@ -1,0 +1,25 @@
+name: PR -> staging gate
+on:
+  pull_request:
+    branches: [main]
+jobs:
+  mr-staging:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: http://gitea-http.gitea.svc.cluster.local:3000/Code/ci-shared/mr-staging@v3
+        with:
+          image-name: homepad-api
+          staging-url: ""
+          test-runtime: go
+          go-version: "1.25"
+          deploy-cmd: |
+            # STAGING-LESS: homepad-api has no CI-reachable staging deployment
+            # target (no k8s staging namespace / no kubectl deploy in prior CI).
+            # The image :<sha>-test is built and pushed to the registry; Joe
+            # repoints prod to the fresh tag (Option 1). No :latest is pushed.
+            echo "No CI-reachable staging target for homepad-api — image pushed; nothing to deploy."
+        env:
+          REGISTRY_USERNAME:  ${{ secrets.REGISTRY_USERNAME }}
+          REGISTRY_PASSWORD:  ${{ secrets.REGISTRY_PASSWORD }}
+          NATS_PUBLISH_URL:   ${{ secrets.NATS_PUBLISH_URL }}
+          NATS_PUBLISH_TOKEN: ${{ secrets.NATS_PUBLISH_TOKEN }}
