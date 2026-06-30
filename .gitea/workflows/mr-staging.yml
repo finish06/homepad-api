@@ -10,7 +10,14 @@ jobs:
         with:
           image-name: homepad-api
           staging-url: ""
-          test-runtime: go
+          # Unit-only gate: a bare `go test ./...` trips the intentional
+          # DATABASE_URL guard (issue #13). This is exactly what `make test-unit`
+          # runs (inlined so the gate doesn't depend on make being on the runner):
+          # the dbguard test skips under -short and the Postgres-backed tests
+          # t.Skip when DATABASE_URL is unset, so no live DB is needed.
+          # ci-shared @v3 sets up Go for this custom test-cmd.
+          test-cmd: |
+            go test ./... -count=1 -run ^Test -short
           go-version: "1.25"
           deploy-cmd: |
             # STAGING-LESS: homepad-api has no CI-reachable staging deployment
