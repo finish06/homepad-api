@@ -10,15 +10,16 @@ import (
 )
 
 // categoryView is the wire shape of a category (v4). sortIndex is the
-// admin-controlled order.
+// admin-controlled order; gridWidth is the App Grid box width 1–6 (SPEC-app-grid).
 type categoryView struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
 	SortIndex int    `json:"sortIndex"`
+	GridWidth int    `json:"gridWidth"`
 }
 
 func newCategoryView(c storage.Category) categoryView {
-	return categoryView{ID: c.ID, Name: c.Name, SortIndex: c.SortIndex}
+	return categoryView{ID: c.ID, Name: c.Name, SortIndex: c.SortIndex, GridWidth: c.GridWidth}
 }
 
 // handleListCategories serves the categories in admin sort_index order (A1/A4).
@@ -76,9 +77,12 @@ func (s *server) handleCreateCategory(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, newCategoryView(c))
 }
 
-// handleUpdateCategory renames one of the caller's OWN categories (v9, A4 — no
-// admin gate, owner-scoped: another user's id → 404, D2/A14). A name collision
-// (for this user) gets 409.
+// handleUpdateCategory updates one of the caller's OWN categories (v9, A4 — no
+// admin gate, owner-scoped: another user's id → 404, D2/A14). Two independently
+// optional fields: `name` (rename; a name collision → 409) and `gridWidth` (the
+// App Grid box width, 1–6, SPEC-app-grid §3B). A gridWidth-only PATCH must not
+// require a name, and vice-versa; when both are present, rename then set width.
+// At least one must be present.
 func (s *server) handleUpdateCategory(w http.ResponseWriter, r *http.Request) {
 	u, ok := s.currentUser(r)
 	if !ok {
@@ -87,31 +91,59 @@ func (s *server) handleUpdateCategory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var in struct {
-		Name string `json:"name"`
+		Name      *string `json:"name"`
+		GridWidth *int    `json:"gridWidth"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		http.Error(w, "invalid JSON body", http.StatusBadRequest)
 		return
 	}
-	in.Name = strings.TrimSpace(in.Name)
-	if in.Name == "" {
-		http.Error(w, "name is required", http.StatusBadRequest)
+	if in.Name == nil && in.GridWidth == nil {
+		http.Error(w, "name or gridWidth is required", http.StatusBadRequest)
+		return
+	}
+	if in.GridWidth != nil && (*in.GridWidth < 1 || *in.GridWidth > 6) {
+		http.Error(w, "gridWidth must be between 1 and 6", http.StatusBadRequest)
 		return
 	}
 
-	c, err := s.store.RenameCategory(r.Context(), r.PathValue("id"), u.ID, in.Name)
-	if errors.Is(err, storage.ErrNotFound) {
-		http.Error(w, "no such category", http.StatusNotFound)
-		return
+	id := r.PathValue("id")
+	var c storage.Category
+	var err error
+
+	if in.Name != nil {
+		name := strings.TrimSpace(*in.Name)
+		if name == "" {
+			http.Error(w, "name is required", http.StatusBadRequest)
+			return
+		}
+		c, err = s.store.RenameCategory(r.Context(), id, u.ID, name)
+		if errors.Is(err, storage.ErrNotFound) {
+			http.Error(w, "no such category", http.StatusNotFound)
+			return
+		}
+		if errors.Is(err, storage.ErrNameTaken) {
+			http.Error(w, "a category with that name already exists", http.StatusConflict)
+			return
+		}
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
 	}
-	if errors.Is(err, storage.ErrNameTaken) {
-		http.Error(w, "a category with that name already exists", http.StatusConflict)
-		return
+
+	if in.GridWidth != nil {
+		c, err = s.store.SetCategoryWidth(r.Context(), id, u.ID, *in.GridWidth)
+		if errors.Is(err, storage.ErrNotFound) {
+			http.Error(w, "no such category", http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
 	}
-	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
+
 	writeJSON(w, http.StatusOK, newCategoryView(c))
 }
 

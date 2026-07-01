@@ -69,11 +69,14 @@ type Service struct {
 }
 
 // Category is an admin-curated catalog section (v4). Ordering is the explicit
-// admin-controlled SortIndex, not alphabetical.
+// admin-controlled SortIndex, not alphabetical. GridWidth (SPEC-app-grid §3B) is
+// the App Grid box width 1–6 — it drives both the box's page-column span and its
+// links-per-row; new categories default to 3.
 type Category struct {
 	ID        string
 	Name      string
 	SortIndex int
+	GridWidth int
 }
 
 func Open(ctx context.Context, dsn string) (*Store, error) {

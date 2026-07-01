@@ -12,7 +12,7 @@ import (
 // (v9 — per-user, Invariant 2).
 func (s *Store) ListCategories(ctx context.Context, userID string) ([]Category, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, name, sort_index FROM categories WHERE user_id = $1 ORDER BY sort_index`, userID)
+		`SELECT id, name, sort_index, grid_width FROM categories WHERE user_id = $1 ORDER BY sort_index`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -21,7 +21,7 @@ func (s *Store) ListCategories(ctx context.Context, userID string) ([]Category, 
 	out := make([]Category, 0)
 	for rows.Next() {
 		var c Category
-		if err := rows.Scan(&c.ID, &c.Name, &c.SortIndex); err != nil {
+		if err := rows.Scan(&c.ID, &c.Name, &c.SortIndex, &c.GridWidth); err != nil {
 			return nil, err
 		}
 		out = append(out, c)
@@ -37,9 +37,9 @@ func (s *Store) CreateCategory(ctx context.Context, userID, name string) (Catego
 	err := s.pool.QueryRow(ctx,
 		`INSERT INTO categories (user_id, name, sort_index)
 		 VALUES ($1, $2, COALESCE((SELECT max(sort_index) + 1 FROM categories WHERE user_id = $1), 0))
-		 RETURNING id, name, sort_index`,
+		 RETURNING id, name, sort_index, grid_width`,
 		userID, name,
-	).Scan(&c.ID, &c.Name, &c.SortIndex)
+	).Scan(&c.ID, &c.Name, &c.SortIndex, &c.GridWidth)
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 		return Category{}, ErrNameTaken
@@ -58,9 +58,9 @@ func (s *Store) RenameCategory(ctx context.Context, id, userID, name string) (Ca
 	var c Category
 	err := s.pool.QueryRow(ctx,
 		`UPDATE categories SET name = $3 WHERE id = $1 AND user_id = $2
-		 RETURNING id, name, sort_index`,
+		 RETURNING id, name, sort_index, grid_width`,
 		id, userID, name,
-	).Scan(&c.ID, &c.Name, &c.SortIndex)
+	).Scan(&c.ID, &c.Name, &c.SortIndex, &c.GridWidth)
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) {
 		if pgErr.Code == "23505" {
@@ -118,4 +118,29 @@ func (s *Store) DeleteCategory(ctx context.Context, id, userID string) error {
 		return nil
 	}
 	return err
+}
+
+// SetCategoryWidth sets the App Grid box width (grid_width) of one of userID's
+// OWN categories (SPEC-app-grid §3B — owner-scoped, matching RenameCategory).
+// The caller validates width ∈ 1–6; the DB CHECK is the floor. Returns
+// ErrNotFound when id names no category owned by userID (malformed UUID,
+// nonexistent, or another user's row → 404).
+func (s *Store) SetCategoryWidth(ctx context.Context, id, userID string, width int) (Category, error) {
+	var c Category
+	err := s.pool.QueryRow(ctx,
+		`UPDATE categories SET grid_width = $3 WHERE id = $1 AND user_id = $2
+		 RETURNING id, name, sort_index, grid_width`,
+		id, userID, width,
+	).Scan(&c.ID, &c.Name, &c.SortIndex, &c.GridWidth)
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "22P02" { // malformed UUID: no such category
+		return Category{}, ErrNotFound
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Category{}, ErrNotFound
+	}
+	if err != nil {
+		return Category{}, err
+	}
+	return c, nil
 }
