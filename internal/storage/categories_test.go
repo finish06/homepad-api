@@ -251,3 +251,71 @@ func findStored(t *testing.T, store *storage.Store, ctx context.Context, uid, id
 	t.Fatalf("service %s not found", id)
 	return storage.Service{}
 }
+
+// SPEC category-pane-width-layout — the atomic layout batch (AC10). These verify
+// SetCategoryLayout persists a whole-batch update and, crucially, that a bad id
+// anywhere in the batch rolls the ENTIRE batch back (no partial layout).
+
+func TestSetCategoryLayout_PersistsBatch(t *testing.T) { // AC10
+	store, ctx := openStore(t)
+	uid := seedStoreUser(t, store, ctx)
+	a, err := store.CreateCategory(ctx, uid, uniqueName(t))
+	require.NoError(t, err)
+	b, err := store.CreateCategory(ctx, uid, uniqueName(t))
+	require.NoError(t, err)
+
+	err = store.SetCategoryLayout(ctx, uid, []storage.CategoryLayout{
+		{ID: a.ID, LayoutRow: 0, LayoutColOrder: 0, LayoutWidthPct: 50},
+		{ID: b.ID, LayoutRow: 0, LayoutColOrder: 1, LayoutWidthPct: 50},
+	})
+	require.NoError(t, err)
+
+	got := map[string]storage.Category{}
+	cats, err := store.ListCategories(ctx, uid)
+	require.NoError(t, err)
+	for _, c := range cats {
+		got[c.ID] = c
+	}
+	assert.Equal(t, 0, got[a.ID].LayoutRow)
+	assert.Equal(t, 0, got[b.ID].LayoutRow)
+	assert.Equal(t, 0, got[a.ID].LayoutColOrder)
+	assert.Equal(t, 1, got[b.ID].LayoutColOrder)
+	assert.Equal(t, 50, got[a.ID].LayoutWidthPct)
+	assert.Equal(t, 50, got[b.ID].LayoutWidthPct)
+}
+
+func TestSetCategoryLayout_AtomicRollbackOnBadID(t *testing.T) { // AC10
+	store, ctx := openStore(t)
+	uid := seedStoreUser(t, store, ctx)
+	a, err := store.CreateCategory(ctx, uid, uniqueName(t))
+	require.NoError(t, err)
+	// a starts at its default full-width row.
+	before := findCategory(t, store, ctx, uid, a.ID)
+
+	// A batch where the FIRST update is valid but the SECOND names a category the
+	// user doesn't own must leave NOTHING changed (all-or-nothing).
+	err = store.SetCategoryLayout(ctx, uid, []storage.CategoryLayout{
+		{ID: a.ID, LayoutRow: 9, LayoutColOrder: 3, LayoutWidthPct: 25},
+		{ID: "00000000-0000-0000-0000-000000000000", LayoutRow: 0, LayoutColOrder: 0, LayoutWidthPct: 100},
+	})
+	require.ErrorIs(t, err, storage.ErrNotFound)
+
+	after := findCategory(t, store, ctx, uid, a.ID)
+	assert.Equal(t, before.LayoutRow, after.LayoutRow, "no partial update on rollback")
+	assert.Equal(t, before.LayoutColOrder, after.LayoutColOrder)
+	assert.Equal(t, before.LayoutWidthPct, after.LayoutWidthPct)
+}
+
+// findCategory returns uid's category by id, failing if absent.
+func findCategory(t *testing.T, store *storage.Store, ctx context.Context, uid, id string) storage.Category {
+	t.Helper()
+	cats, err := store.ListCategories(ctx, uid)
+	require.NoError(t, err)
+	for _, c := range cats {
+		if c.ID == id {
+			return c
+		}
+	}
+	t.Fatalf("category %s not found", id)
+	return storage.Category{}
+}
