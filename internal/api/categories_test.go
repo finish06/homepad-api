@@ -97,6 +97,23 @@ func TestAdminCanCreateCategory_AndDuplicate409(t *testing.T) {
 	assert.Equal(t, http.StatusConflict, dup.StatusCode, "duplicate category name must be 409")
 }
 
+// issue #224 — SPEC-app-grid §3A: "+Add box → POST /api/categories — Admin-only".
+// The App Grid is an admin-curated dashboard, so category creation is server-side
+// admin-gated. A non-admin session must be rejected with 403 (the frontend hides
+// the +Add affordance, but a hand-crafted request must not slip past). This
+// supersedes the v9 per-user create model (see removed TestUserCanMutateOwnCategories_A4).
+func TestNonAdminCannotCreateCategory_403(t *testing.T) {
+	s := testsupport.NewServer(t)
+	defer s.Close()
+
+	resp := doJSON(t, http.MethodPost, s.URL+"/api/categories", "non-admin-session", map[string]any{"name": "Sneaky"})
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode, "non-admin POST /api/categories must be 403")
+
+	// The rejected create left no row: the admin's dashboard is still empty.
+	assert.Empty(t, getCategories(t, s.URL, "admin-session"), "a 403'd create must not persist a category")
+}
+
 // v9 (A4) — the admin gate on categories is GONE: a non-admin manages their OWN
 // categories. Each mutating verb succeeds on the caller's own rows. (Cross-user
 // 404 is covered in isolation_test.go, A14.)
