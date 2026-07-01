@@ -69,11 +69,26 @@ type Service struct {
 }
 
 // Category is an admin-curated catalog section (v4). Ordering is the explicit
-// admin-controlled SortIndex, not alphabetical.
+// admin-controlled SortIndex, not alphabetical. The Layout* fields (SPEC
+// category-pane-width-layout) place the category in a 2D grid of side-by-side
+// panes; defaults (row = sort_index, col 0, width 100) reproduce the pre-feature
+// full-width stack.
 type Category struct {
-	ID        string
-	Name      string
-	SortIndex int
+	ID             string
+	Name           string
+	SortIndex      int
+	LayoutRow      int
+	LayoutColOrder int
+	LayoutWidthPct int
+}
+
+// CategoryLayout is one category's layout assignment, the unit of the atomic
+// bulk save (SetCategoryLayout).
+type CategoryLayout struct {
+	ID             string
+	LayoutRow      int
+	LayoutColOrder int
+	LayoutWidthPct int
 }
 
 func Open(ctx context.Context, dsn string) (*Store, error) {

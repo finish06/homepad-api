@@ -12,13 +12,23 @@ import (
 // categoryView is the wire shape of a category (v4). sortIndex is the
 // admin-controlled order.
 type categoryView struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	SortIndex int    `json:"sortIndex"`
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	SortIndex      int    `json:"sortIndex"`
+	LayoutRow      int    `json:"layoutRow"`
+	LayoutColOrder int    `json:"layoutColOrder"`
+	LayoutWidthPct int    `json:"layoutWidthPct"`
 }
 
 func newCategoryView(c storage.Category) categoryView {
-	return categoryView{ID: c.ID, Name: c.Name, SortIndex: c.SortIndex}
+	return categoryView{
+		ID:             c.ID,
+		Name:           c.Name,
+		SortIndex:      c.SortIndex,
+		LayoutRow:      c.LayoutRow,
+		LayoutColOrder: c.LayoutColOrder,
+		LayoutWidthPct: c.LayoutWidthPct,
+	}
 }
 
 // handleListCategories serves the categories in admin sort_index order (A1/A4).
@@ -160,4 +170,50 @@ func (s *server) handleDeleteCategory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleSetCategoryLayout persists a batch of category layout assignments for
+// the caller's OWN categories atomically (SPEC AC10 — all-or-nothing). An id not
+// naming one of the caller's categories → 404 and the whole batch rolls back;
+// no partial layout is ever stored. Success is 200.
+func (s *server) handleSetCategoryLayout(w http.ResponseWriter, r *http.Request) {
+	u, ok := s.currentUser(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var in struct {
+		Layout []struct {
+			ID             string `json:"id"`
+			LayoutRow      int    `json:"layoutRow"`
+			LayoutColOrder int    `json:"layoutColOrder"`
+			LayoutWidthPct int    `json:"layoutWidthPct"`
+		} `json:"layout"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		return
+	}
+
+	updates := make([]storage.CategoryLayout, 0, len(in.Layout))
+	for _, l := range in.Layout {
+		updates = append(updates, storage.CategoryLayout{
+			ID:             l.ID,
+			LayoutRow:      l.LayoutRow,
+			LayoutColOrder: l.LayoutColOrder,
+			LayoutWidthPct: l.LayoutWidthPct,
+		})
+	}
+
+	err := s.store.SetCategoryLayout(r.Context(), u.ID, updates)
+	if errors.Is(err, storage.ErrNotFound) {
+		http.Error(w, "no such category in layout", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
 }
