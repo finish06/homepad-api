@@ -221,9 +221,11 @@ func TestAddFromLibrary_CategoryRules(t *testing.T) {
 	sv := decodeService(t, addFromLibrary(t, s.URL, "non-admin-session", offer.ID, nil))
 	assert.Nil(t, sv.CategoryID, "no body → Uncategorized")
 
-	// own category → filed there
-	mine := createCategory(t, s.URL, "non-admin-session", "MyMedia")
-	sv2 := decodeService(t, addFromLibrary(t, s.URL, "non-admin-session", offer.ID, map[string]any{"categoryId": mine.ID}))
+	// own category → filed there (issue #224: category create is admin-only, so
+	// the "files into a category you own" rule is now exercised by the admin — a
+	// non-admin can no longer own a category to file into).
+	mine := createCategory(t, s.URL, "admin-session", "MyMedia")
+	sv2 := decodeService(t, addFromLibrary(t, s.URL, "admin-session", offer.ID, map[string]any{"categoryId": mine.ID}))
 	require.NotNil(t, sv2.CategoryID)
 	assert.Equal(t, mine.ID, *sv2.CategoryID)
 

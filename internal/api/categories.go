@@ -42,13 +42,14 @@ func (s *server) handleListCategories(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"categories": out})
 }
 
-// handleCreateCategory adds a category to the caller's OWN dashboard (v9, A4 —
-// no admin gate, per-user). A duplicate name (for this user) gets 409. The new
-// category is appended last (sort_index max+1 among the user's categories).
+// handleCreateCategory adds a category to the App Grid (issue #224, SPEC-app-grid
+// §3A — "+Add box → POST /api/categories — Admin-only"). Creation is admin-gated:
+// a non-admin session gets 403 (the frontend hides +Add, but the server must not
+// trust the client gate). A duplicate name gets 409; the new category is appended
+// last (sort_index max+1). This supersedes the v9/A4 per-user create model.
 func (s *server) handleCreateCategory(w http.ResponseWriter, r *http.Request) {
-	u, ok := s.currentUser(r)
+	u, ok := s.requireAdmin(w, r)
 	if !ok {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
