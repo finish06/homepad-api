@@ -1,0 +1,19 @@
+name: main -> staging release
+on:
+  push:
+    branches: [main]
+jobs:
+  staging-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: http://gitea-http.gitea.svc.cluster.local:3000/Code/ci-shared/staging-release@v3
+        with:
+          image-name: homepad-api
+          deploy-cmd: |
+            # STAGING-LESS: homepad-api has no CI-reachable staging deployment
+            # target. The image :<sha>-beta (+:<sha>) is built and pushed to the
+            # registry; Joe repoints prod to the fresh tag (Option 1). No :latest.
+            echo "No CI-reachable staging target for homepad-api — image pushed; nothing to deploy."
+        env:
+          REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+          REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
