@@ -114,38 +114,13 @@ func TestNonAdminCannotCreateCategory_403(t *testing.T) {
 	assert.Empty(t, getCategories(t, s.URL, "admin-session"), "a 403'd create must not persist a category")
 }
 
-// v9 (A4) — the admin gate on categories is GONE: a non-admin manages their OWN
-// categories. Each mutating verb succeeds on the caller's own rows. (Cross-user
-// 404 is covered in isolation_test.go, A14.)
-func TestUserCanMutateOwnCategories_A4(t *testing.T) {
-	s := testsupport.NewServer(t)
-	defer s.Close()
-
-	// create (own)
-	cat := createCategory(t, s.URL, "non-admin-session", "My Media")
-	assert.Equal(t, "My Media", cat.Name)
-
-	// rename (own) → 200
-	resp := doJSON(t, http.MethodPatch, s.URL+"/api/categories/"+cat.ID, "non-admin-session", map[string]any{"name": "My Tools"})
-	resp.Body.Close()
-	assert.Equal(t, http.StatusOK, resp.StatusCode, "rename own category → 200")
-
-	// reorder (own) → 204
-	resp = doJSON(t, http.MethodPut, s.URL+"/api/categories/order", "non-admin-session", map[string]any{"order": []string{cat.ID}})
-	resp.Body.Close()
-	assert.Equal(t, http.StatusNoContent, resp.StatusCode, "reorder own categories → 204")
-
-	// assign own service to own category → 200
-	svc := getServicesFull(t, s.URL, "non-admin-session")[0]
-	resp = doJSON(t, http.MethodPatch, s.URL+"/api/services/"+svc.ID, "non-admin-session", map[string]any{"categoryId": cat.ID})
-	resp.Body.Close()
-	assert.Equal(t, http.StatusOK, resp.StatusCode, "assign own service to own category → 200")
-
-	// delete (own) → 204
-	resp = doJSON(t, http.MethodDelete, s.URL+"/api/categories/"+cat.ID, "non-admin-session", nil)
-	resp.Body.Close()
-	assert.Equal(t, http.StatusNoContent, resp.StatusCode, "delete own category → 204")
-}
+// NOTE (issue #224): the former TestUserCanMutateOwnCategories_A4 asserted the
+// v9 per-user model where a non-admin could create+rename+reorder+delete their
+// OWN categories. SPEC-app-grid §3A supersedes that: category creation is now
+// admin-only (see TestNonAdminCannotCreateCategory_403). Because a non-admin can
+// no longer create a category, the per-user own-mutation flow is unreachable via
+// the public API and its test was removed. Cross-user 404 on the still-owner-scoped
+// rename/delete verbs remains covered in isolation_test.go (A14).
 
 // A7 — a user may assign a service only to their OWN category; another user's
 // (or a nonexistent) category → 400, service unchanged.
