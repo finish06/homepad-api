@@ -115,6 +115,7 @@ func TestSharedCatalog_NonAdminWritesForbidden(t *testing.T) {
 	// Real ids from the shared set so the gate is reached before any not-found.
 	cat := createCategory(t, s.URL, "admin-session", "Media")
 	svcID := listServices(t, s.URL, "admin-session")[0].ID
+	offer := createOffer(t, s.URL, "admin-session", "Plex", "https://plex.example.com")
 
 	writes := []struct {
 		ac, name, method, url string
@@ -127,6 +128,7 @@ func TestSharedCatalog_NonAdminWritesForbidden(t *testing.T) {
 		{"AC-009", "POST /api/services", http.MethodPost, "/api/services", map[string]any{"slug": "x", "name": "X", "url": "https://x.example.com"}},
 		{"AC-010", "PATCH /api/services/{id}", http.MethodPatch, "/api/services/" + svcID, map[string]any{"name": "X"}},
 		{"AC-011", "DELETE /api/services/{id}", http.MethodDelete, "/api/services/" + svcID, nil},
+		{"AC-010b", "POST /api/library/{id}/add", http.MethodPost, "/api/library/" + offer.ID + "/add", nil},
 	}
 	for _, wtc := range writes {
 		t.Run(wtc.ac+" "+wtc.name, func(t *testing.T) {
