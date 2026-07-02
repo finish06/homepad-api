@@ -122,29 +122,11 @@ func TestNonAdminCannotCreateCategory_403(t *testing.T) {
 // the public API and its test was removed. Cross-user 404 on the still-owner-scoped
 // rename/delete verbs remains covered in isolation_test.go (A14).
 
-// A7 — a user may assign a service only to their OWN category; another user's
-// (or a nonexistent) category → 400, service unchanged.
-func TestAssignForeignCategory_400_A7(t *testing.T) {
-	s := testsupport.NewServer(t)
-	defer s.Close()
-
-	// admin owns a category; the non-admin must not be able to file their own
-	// service into it.
-	adminCat := createCategory(t, s.URL, "admin-session", "Admin Media")
-	userSvc := getServicesFull(t, s.URL, "non-admin-session")[0]
-
-	resp := doJSON(t, http.MethodPatch, s.URL+"/api/services/"+userSvc.ID, "non-admin-session", map[string]any{"categoryId": adminCat.ID})
-	resp.Body.Close()
-	assert.Equal(t, http.StatusBadRequest, resp.StatusCode, "assigning another user's category → 400")
-
-	// The user's service is unchanged (still Uncategorized).
-	after := getServicesFull(t, s.URL, "non-admin-session")
-	for _, sv := range after {
-		if sv.ID == userSvc.ID {
-			assert.Nil(t, sv.CategoryID, "a rejected foreign-category assignment leaves the service Uncategorized")
-		}
-	}
-}
+// SPEC-245-224 — service category-assignment (PATCH /api/services/{id}) is
+// admin-only on the shared catalog now; a non-admin gets 403 (covered by
+// shared_catalog_test.go). The retired A7 "non-admin assigns a foreign category
+// → 400" test (per-user model) is superseded — under a single shared catalog
+// there is no other user's category to be "foreign".
 
 // A3 — admin renames a category (200); rename to an existing name → 409; unknown id → 404.
 func TestAdminCanRenameCategory_409_404(t *testing.T) {

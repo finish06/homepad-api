@@ -8,8 +8,10 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-// ListCategories returns userID's OWN categories in their sort_index order
-// (v9 — per-user, Invariant 2).
+// ListCategories returns userID's categories in their sort_index order. Under
+// the shared catalog model (SPEC-245-224) the API layer passes the shared
+// catalog owner's id here (SharedCatalogOwnerID), so every user reads the same
+// admin-managed set; the storage method itself stays a plain per-owner list.
 func (s *Store) ListCategories(ctx context.Context, userID string) ([]Category, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT id, name, sort_index, grid_width FROM categories WHERE user_id = $1 ORDER BY sort_index`, userID)

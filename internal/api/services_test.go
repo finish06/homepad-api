@@ -65,15 +65,16 @@ func TestServicesEndpoint_NotMonitored_VsUnknown(t *testing.T) {
 	s := testsupport.NewServer(t)
 	defer s.Close()
 
-	// Create a service with NO gatus_key on the caller's own dashboard. The POST
-	// response already carries the resolved status.
+	// Create a service with NO gatus_key in the shared catalog. Service creation
+	// is admin-only (SPEC-245-224), so the admin adds it; the POST response
+	// already carries the resolved status.
 	body, _ := json.Marshal(map[string]any{
 		"slug": "proxmox", "name": "Proxmox",
 		"url": "https://proxmox.example.com", "icon": "proxmox",
 		// gatus_key intentionally omitted (empty) → not wired to monitoring
 	})
 	req, _ := http.NewRequest(http.MethodPost, s.URL+"/api/services", bytes.NewReader(body))
-	req.AddCookie(&http.Cookie{Name: "homepad_session", Value: "any-user"})
+	req.AddCookie(&http.Cookie{Name: "homepad_session", Value: "admin-session"})
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
 	defer resp.Body.Close()
@@ -89,7 +90,7 @@ func TestServicesEndpoint_NotMonitored_VsUnknown(t *testing.T) {
 	// Now list: the unwired service is NOT_MONITORED; the seeded "gitea" (gatus_key
 	// set, Gatus unreachable) stays UNKNOWN.
 	lreq, _ := http.NewRequest(http.MethodGet, s.URL+"/api/services", nil)
-	lreq.AddCookie(&http.Cookie{Name: "homepad_session", Value: "any-user"})
+	lreq.AddCookie(&http.Cookie{Name: "homepad_session", Value: "admin-session"})
 	lresp, err := http.DefaultClient.Do(lreq)
 	require.NoError(t, err)
 	defer lresp.Body.Close()

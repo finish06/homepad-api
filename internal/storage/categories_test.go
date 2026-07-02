@@ -241,7 +241,7 @@ func indexCategories(t *testing.T, store *storage.Store, ctx context.Context, ui
 // findStored returns uid's service with the given id, failing if absent.
 func findStored(t *testing.T, store *storage.Store, ctx context.Context, uid, id string) storage.Service {
 	t.Helper()
-	svcs, err := store.ListServices(ctx, uid)
+	svcs, err := store.ListServices(ctx, uid, uid)
 	require.NoError(t, err)
 	for _, sv := range svcs {
 		if sv.ID == id {
