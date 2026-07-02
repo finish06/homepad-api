@@ -37,6 +37,23 @@ type Store struct {
 	pool *pgxpool.Pool
 }
 
+// SharedCatalogOwnerID returns the id of the first admin — the owner of the
+// shared catalog (SPEC-245-224). It mirrors migration 0007's cutover, which
+// assigned every category/service to `(role='admin' ORDER BY created_at, id
+// LIMIT 1)`. Catalog reads resolve this owner and list ITS rows, so every
+// authenticated user sees the same admin-managed grid (#245) and non-admin
+// rows created during the #224 era never pollute it. ErrNotFound when no admin
+// exists (a degenerate install) so the caller can serve an empty catalog.
+func (s *Store) SharedCatalogOwnerID(ctx context.Context) (string, error) {
+	var id string
+	err := s.pool.QueryRow(ctx,
+		`SELECT id FROM users WHERE role = 'admin' ORDER BY created_at, id LIMIT 1`).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return id, err
+}
+
 type User struct {
 	ID           string
 	Email        string
@@ -187,18 +204,21 @@ func (s *Store) SetThemePref(ctx context.Context, userID, pref string) error {
 	return nil
 }
 
-// ListServices returns userID's OWN catalog (v9 — per-user, Invariant 2) in
-// their personal layout order (A5/A6): services the user has placed come first
-// by their saved sort_index, then any not-yet-placed in name order.
-func (s *Store) ListServices(ctx context.Context, userID string) ([]Service, error) {
+// ListServices returns ownerID's services decorated with viewerID's personal
+// layout order (A5/A6): services the viewer has placed come first by their saved
+// sort_index, then the rest in name order. Under the shared catalog model
+// (SPEC-245-224) the API passes the shared catalog owner as ownerID and the
+// calling user as viewerID, so every user reads the same admin-managed set
+// (#245) but keeps their OWN layout ordering of it.
+func (s *Store) ListServices(ctx context.Context, ownerID, viewerID string) ([]Service, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT s.id, s.slug, s.name, s.description, s.url, s.icon, COALESCE(s.gatus_key, ''),
 		        s.category_id, c.name, s.source_library_id
 		   FROM services s
-		   LEFT JOIN user_layout ul ON ul.service_id = s.id AND ul.user_id = $1
+		   LEFT JOIN user_layout ul ON ul.service_id = s.id AND ul.user_id = $2
 		   LEFT JOIN categories c   ON c.id = s.category_id
 		  WHERE s.user_id = $1
-		  ORDER BY ul.sort_index NULLS LAST, s.name`, userID)
+		  ORDER BY ul.sort_index NULLS LAST, s.name`, ownerID, viewerID)
 	if err != nil {
 		return nil, err
 	}
@@ -482,11 +502,9 @@ func (s *Store) DeleteIcon(ctx context.Context, serviceID, userID, variant strin
 // already-favorited service is a no-op. Returns ErrNotFound when serviceID does
 // not name a real service (FK violation or malformed UUID).
 func (s *Store) AddFavorite(ctx context.Context, userID, serviceID string) error {
-	// v9 — a user may only favorite their OWN service; another user's (or a
-	// nonexistent) service → ErrNotFound (404, D2 — Invariant 2).
-	if err := s.serviceOwnedBy(ctx, serviceID, userID); err != nil {
-		return err
-	}
+	// SPEC-245-224 — the catalog is shared, so any user may favorite any service
+	// in it. Ownership is no longer required (the v9 per-user "own service only"
+	// gate is retired); the FK below still rejects a nonexistent service (404).
 	_, err := s.pool.Exec(ctx,
 		`INSERT INTO favorites (user_id, service_id) VALUES ($1, $2)
 		 ON CONFLICT DO NOTHING`,
@@ -548,12 +566,13 @@ func (s *Store) SetLayout(ctx context.Context, userID string, orderedIDs []strin
 		return err
 	}
 	for i, id := range orderedIDs {
-		// v9 — only the caller's OWN services may be placed: the INSERT is
-		// guarded on ownership, so a foreign or nonexistent id places 0 rows →
-		// ErrNotFound (404/unchanged, Invariant 2 / A14).
+		// SPEC-245-224 — the catalog is shared, so a user may order any service
+		// that exists in it (the v9 per-user "own services only" gate is
+		// retired). The EXISTS guard now only rejects a nonexistent id → 0 rows
+		// → ErrNotFound (404).
 		tag, err := tx.Exec(ctx,
 			`INSERT INTO user_layout (user_id, service_id, sort_index)
-			 SELECT $1, $2, $3 WHERE EXISTS (SELECT 1 FROM services WHERE id = $2 AND user_id = $1)`,
+			 SELECT $1, $2, $3 WHERE EXISTS (SELECT 1 FROM services WHERE id = $2)`,
 			userID, id, i)
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && (pgErr.Code == "23503" || pgErr.Code == "22P02") {

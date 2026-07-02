@@ -49,7 +49,18 @@ func (s *server) handleListServices(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	svcs, err := s.store.ListServices(r.Context(), u.ID)
+	owner, err := s.store.SharedCatalogOwnerID(r.Context())
+	if errors.Is(err, storage.ErrNotFound) {
+		// No admin → no shared catalog yet; serve an empty list rather than 500.
+		writeJSON(w, http.StatusOK, map[string]any{"services": []serviceView{}})
+		return
+	}
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	// Shared set (owner's rows) decorated with the caller's own layout order.
+	svcs, err := s.store.ListServices(r.Context(), owner, u.ID)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
@@ -69,16 +80,16 @@ func (s *server) handleListServices(w http.ResponseWriter, r *http.Request) {
 	out := make([]serviceView, 0, len(svcs))
 	for _, sv := range svcs {
 		out = append(out, serviceView{
-			ID:           sv.ID,
-			Slug:         sv.Slug,
-			Name:         sv.Name,
-			Description:  sv.Description,
-			URL:          sv.URL,
-			Icon:         sv.Icon,
-			Status:       statusFor(snap, sv.GatusKey),
-			Favorite:     favs[sv.ID],
-			IconLight:    icons[sv.ID].Light,
-			IconDark:     icons[sv.ID].Dark,
+			ID:              sv.ID,
+			Slug:            sv.Slug,
+			Name:            sv.Name,
+			Description:     sv.Description,
+			URL:             sv.URL,
+			Icon:            sv.Icon,
+			Status:          statusFor(snap, sv.GatusKey),
+			Favorite:        favs[sv.ID],
+			IconLight:       icons[sv.ID].Light,
+			IconDark:        icons[sv.ID].Dark,
 			CategoryID:      sv.CategoryID,
 			CategoryName:    sv.CategoryName,
 			SourceLibraryID: sv.SourceLibraryID,
@@ -88,12 +99,12 @@ func (s *server) handleListServices(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"services": out})
 }
 
-// handleCreateService creates a service on the caller's OWN dashboard (v9, A4 —
-// no admin gate, per-user). Slug uniqueness is per-user.
+// handleCreateService adds a service to the shared catalog. Admin-only under the
+// shared catalog model (SPEC-245-224, #224): a non-admin session gets 403. The
+// row is owned by the acting admin (the shared-catalog owner).
 func (s *server) handleCreateService(w http.ResponseWriter, r *http.Request) {
-	u, ok := s.currentUser(r)
+	u, ok := s.requireAdmin(w, r)
 	if !ok {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
@@ -145,13 +156,12 @@ func (s *server) handleCreateService(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleUpdateService edits one of the caller's OWN services (v9, A4 — no admin
-// gate, owner-scoped: another user's id → 404, D2/A14). Body fields are
-// optional — only those present are changed.
+// handleUpdateService edits a shared catalog service. Admin-only under the
+// shared catalog model (SPEC-245-224, #224): a non-admin session gets 403. Body
+// fields are optional — only those present are changed.
 func (s *server) handleUpdateService(w http.ResponseWriter, r *http.Request) {
-	u, ok := s.currentUser(r)
+	u, ok := s.requireAdmin(w, r)
 	if !ok {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
@@ -197,12 +207,12 @@ func (s *server) handleUpdateService(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, serviceView{
-		ID:           sv.ID,
-		Slug:         sv.Slug,
-		Name:         sv.Name,
-		Description:  sv.Description,
-		URL:          sv.URL,
-		Icon:         sv.Icon,
+		ID:              sv.ID,
+		Slug:            sv.Slug,
+		Name:            sv.Name,
+		Description:     sv.Description,
+		URL:             sv.URL,
+		Icon:            sv.Icon,
 		Status:          statusFor(s.poller.Snapshot(), sv.GatusKey),
 		CategoryID:      sv.CategoryID,
 		CategoryName:    sv.CategoryName,
@@ -233,12 +243,11 @@ func (o *optionalString) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// handleDeleteService removes one of the caller's OWN services (v9, A4 — no
-// admin gate, owner-scoped: another user's id → 404, D2/A14).
+// handleDeleteService removes a shared catalog service. Admin-only under the
+// shared catalog model (SPEC-245-224, #224): a non-admin session gets 403.
 func (s *server) handleDeleteService(w http.ResponseWriter, r *http.Request) {
-	u, ok := s.currentUser(r)
+	u, ok := s.requireAdmin(w, r)
 	if !ok {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 

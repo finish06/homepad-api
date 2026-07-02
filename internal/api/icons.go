@@ -64,14 +64,13 @@ func (s *server) handleGetIcon(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(ic.Bytes)
 }
 
-// handlePutIcon stores (creates or replaces) a PNG variant on one of the
-// caller's OWN services (v9, A5 — no admin gate, owner-scoped: another user's
-// service → 404, D2/A14). The raw request body IS the PNG. Validation order:
+// handlePutIcon stores (creates or replaces) a PNG variant on a shared catalog
+// service. Admin-only under the shared catalog model (SPEC-245-224, #224): a
+// non-admin session gets 403. The raw request body IS the PNG. Validation order:
 // byte size (413) → PNG magic-byte sniff (415) → dimensions (422). 204 on success.
 func (s *server) handlePutIcon(w http.ResponseWriter, r *http.Request) {
-	u, ok := s.currentUser(r)
+	u, ok := s.requireAdmin(w, r)
 	if !ok {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 	variant := r.PathValue("variant")
@@ -120,13 +119,12 @@ func (s *server) handlePutIcon(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// handleDeleteIcon removes a PNG variant on one of the caller's OWN services
-// (v9, A5 — no admin gate, owner-scoped: another user's service → 404, D2/A14).
-// Idempotent for the owner: 204 whether or not bytes existed (spec A11).
+// handleDeleteIcon removes a PNG variant on a shared catalog service. Admin-only
+// under the shared catalog model (SPEC-245-224, #224): a non-admin session gets
+// 403. Idempotent for the admin: 204 whether or not bytes existed (spec A11).
 func (s *server) handleDeleteIcon(w http.ResponseWriter, r *http.Request) {
-	u, ok := s.currentUser(r)
+	u, ok := s.requireAdmin(w, r)
 	if !ok {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 	variant := r.PathValue("variant")

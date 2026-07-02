@@ -166,9 +166,12 @@ func getServicesWithSource(t *testing.T, baseURL, token string) []addedService {
 }
 
 // A10 — POST /api/library/{id}/add copies the offer into a new services row
-// owned by the caller (fields copied, source_library_id set, slug derived &
-// unique), returns the serviceView, and the app appears in GET /api/services;
-// a second GET /api/library shows added=true for that offer only.
+// (fields copied, source_library_id set, slug derived & unique), returns the
+// serviceView, and the app appears in GET /api/services; a second GET
+// /api/library shows added=true for that offer only. Under SPEC-245-224 the
+// library is an admin tool that adds into the SHARED catalog, so the caller here
+// is the admin (shared-catalog owner) — a copy the admin adds is what every user
+// then sees.
 func TestAddFromLibrary_CopiesOfferOntoCallerDashboard(t *testing.T) {
 	s := testsupport.NewServer(t)
 	defer s.Close()
@@ -176,7 +179,7 @@ func TestAddFromLibrary_CopiesOfferOntoCallerDashboard(t *testing.T) {
 	offer := createOffer(t, s.URL, "admin-session", "Plex", "https://plex.example.com")
 	other := createOffer(t, s.URL, "admin-session", "Sonarr", "https://sonarr.example.com")
 
-	resp := addFromLibrary(t, s.URL, "non-admin-session", offer.ID, nil)
+	resp := addFromLibrary(t, s.URL, "admin-session", offer.ID, nil)
 	require.Equal(t, http.StatusCreated, resp.StatusCode, "add must return 201")
 	sv := decodeService(t, resp)
 	assert.Equal(t, "Plex", sv.Name)
@@ -187,7 +190,7 @@ func TestAddFromLibrary_CopiesOfferOntoCallerDashboard(t *testing.T) {
 	require.NotNil(t, sv.SourceLibraryID)
 	assert.Equal(t, offer.ID, *sv.SourceLibraryID, "provenance set")
 
-	// The copy is now on the caller's dashboard.
+	// The copy is now in the shared catalog (visible to every user).
 	found := false
 	for _, x := range getServicesWithSource(t, s.URL, "non-admin-session") {
 		if x.ID == sv.ID {
@@ -196,10 +199,10 @@ func TestAddFromLibrary_CopiesOfferOntoCallerDashboard(t *testing.T) {
 			assert.Equal(t, offer.ID, *x.SourceLibraryID)
 		}
 	}
-	assert.True(t, found, "added copy appears in GET /api/services")
+	assert.True(t, found, "added copy appears in the shared GET /api/services for every user")
 
 	// added flag: true for the added offer only.
-	for _, o := range getLibrary(t, s.URL, "non-admin-session") {
+	for _, o := range getLibrary(t, s.URL, "admin-session") {
 		if o.ID == offer.ID {
 			assert.True(t, o.Added, "added offer → added=true")
 		}
@@ -248,7 +251,9 @@ func TestLibraryEditDelete_DoesNotTouchCopies(t *testing.T) {
 	defer s.Close()
 
 	offer := createOffer(t, s.URL, "admin-session", "Vaultwarden", "https://vw.example.com")
-	copy := decodeService(t, addFromLibrary(t, s.URL, "non-admin-session", offer.ID, nil))
+	// SPEC-245-224 — the library adds into the SHARED catalog, so the admin
+	// (shared-catalog owner) adds the copy; it is then visible to every user.
+	copy := decodeService(t, addFromLibrary(t, s.URL, "admin-session", offer.ID, nil))
 
 	// admin edits the offer
 	patch := doJSON(t, http.MethodPatch, s.URL+"/api/library/"+offer.ID, "admin-session",
@@ -295,8 +300,9 @@ func TestAddFromLibrary_TwiceYieldsTwoCopies(t *testing.T) {
 
 	offer := createOffer(t, s.URL, "admin-session", "Radarr", "https://radarr.example.com")
 
-	c1 := decodeService(t, addFromLibrary(t, s.URL, "non-admin-session", offer.ID, nil))
-	c2 := decodeService(t, addFromLibrary(t, s.URL, "non-admin-session", offer.ID, nil))
+	// SPEC-245-224 — admin (shared-catalog owner) adds; copies land in the shared set.
+	c1 := decodeService(t, addFromLibrary(t, s.URL, "admin-session", offer.ID, nil))
+	c2 := decodeService(t, addFromLibrary(t, s.URL, "admin-session", offer.ID, nil))
 	assert.NotEqual(t, c1.ID, c2.ID, "two distinct copies")
 	assert.NotEqual(t, c1.Slug, c2.Slug, "second copy gets a unique slug")
 	require.NotNil(t, c1.SourceLibraryID)
@@ -313,7 +319,7 @@ func TestAddFromLibrary_TwiceYieldsTwoCopies(t *testing.T) {
 	assert.Equal(t, 2, count, "both copies present — no dedupe")
 
 	for _, id := range []string{c1.ID, c2.ID} {
-		del := doJSON(t, http.MethodDelete, s.URL+"/api/services/"+id, "non-admin-session", nil)
+		del := doJSON(t, http.MethodDelete, s.URL+"/api/services/"+id, "admin-session", nil)
 		assert.Equal(t, http.StatusNoContent, del.StatusCode, "each copy is independently deletable")
 		del.Body.Close()
 	}
