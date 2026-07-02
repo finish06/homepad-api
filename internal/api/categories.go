@@ -10,7 +10,7 @@ import (
 )
 
 // categoryView is the wire shape of a category (v4). sortIndex is the
-// admin-controlled order; gridWidth is the App Grid box width 1–6 (SPEC-app-grid).
+// admin-controlled order; gridWidth is the App Grid box width 1–8 (SPEC-app-grid).
 type categoryView struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
@@ -81,7 +81,7 @@ func (s *server) handleCreateCategory(w http.ResponseWriter, r *http.Request) {
 // handleUpdateCategory updates one of the caller's OWN categories (v9, A4 — no
 // admin gate, owner-scoped: another user's id → 404, D2/A14). Two independently
 // optional fields: `name` (rename; a name collision → 409) and `gridWidth` (the
-// App Grid box width, 1–6, SPEC-app-grid §3B). A gridWidth-only PATCH must not
+// App Grid box width, 1–8, SPEC-app-grid §3B). A gridWidth-only PATCH must not
 // require a name, and vice-versa; when both are present, rename then set width.
 // At least one must be present.
 func (s *server) handleUpdateCategory(w http.ResponseWriter, r *http.Request) {
@@ -103,8 +103,8 @@ func (s *server) handleUpdateCategory(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "name or gridWidth is required", http.StatusBadRequest)
 		return
 	}
-	if in.GridWidth != nil && (*in.GridWidth < 1 || *in.GridWidth > 6) {
-		http.Error(w, "gridWidth must be between 1 and 6", http.StatusBadRequest)
+	if in.GridWidth != nil && (*in.GridWidth < 1 || *in.GridWidth > 8) {
+		http.Error(w, "gridWidth must be between 1 and 8", http.StatusBadRequest)
 		return
 	}
 

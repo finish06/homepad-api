@@ -11,7 +11,7 @@ import (
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/testsupport"
 )
 
-// SPEC-app-grid §3B — category.grid_width: the box's App Grid width (1–6).
+// SPEC-app-grid §3B + A1 — category.grid_width: the box's App Grid width (1–8).
 // Persisted (§4A DECIDED = PERSIST), read on GET /api/categories, written via
 // PATCH /api/categories/{id} {gridWidth}. Owner-scoped, matching the sibling
 // rename PATCH on the same endpoint. AC-018 (survives reload), AC-020 (new box
