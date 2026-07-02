@@ -122,7 +122,7 @@ func (s *Store) DeleteCategory(ctx context.Context, id, userID string) error {
 
 // SetCategoryWidth sets the App Grid box width (grid_width) of one of userID's
 // OWN categories (SPEC-app-grid §3B — owner-scoped, matching RenameCategory).
-// The caller validates width ∈ 1–6; the DB CHECK is the floor. Returns
+// The caller validates width ∈ 1–8; the DB CHECK is the floor. Returns
 // ErrNotFound when id names no category owned by userID (malformed UUID,
 // nonexistent, or another user's row → 404).
 func (s *Store) SetCategoryWidth(ctx context.Context, id, userID string, width int) (Category, error) {

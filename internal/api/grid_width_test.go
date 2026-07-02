@@ -11,7 +11,7 @@ import (
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/testsupport"
 )
 
-// SPEC-app-grid §3B — category.grid_width: the box's App Grid width (1–6).
+// SPEC-app-grid §3B + A1 — category.grid_width: the box's App Grid width (1–8).
 // Persisted (§4A DECIDED = PERSIST), read on GET /api/categories, written via
 // PATCH /api/categories/{id} {gridWidth}. Owner-scoped, matching the sibling
 // rename PATCH on the same endpoint. AC-018 (survives reload), AC-020 (new box
@@ -65,14 +65,16 @@ func TestPatchCategoryGridWidth_Persists(t *testing.T) {
 	assert.Equal(t, 5, got.GridWidth, "gridWidth must persist across a re-read")
 }
 
-// §3B — gridWidth outside 1–6 is rejected (400) and nothing is changed.
+// §3B + Amendment A1 — gridWidth outside 1–8 is rejected (400) and nothing is
+// changed. (A1 widens the range from 1–6 to 1–8; 7 is now valid — see the accept
+// test below.)
 func TestPatchCategoryGridWidth_Rejects_OutOfRange(t *testing.T) {
 	s := testsupport.NewServer(t)
 	defer s.Close()
 
 	c := createCategory(t, s.URL, "admin-session", "Infra")
 
-	for _, bad := range []int{0, 7, -1} {
+	for _, bad := range []int{0, 9, -1} {
 		resp := doJSON(t, http.MethodPatch, s.URL+"/api/categories/"+c.ID, "admin-session",
 			map[string]any{"gridWidth": bad})
 		resp.Body.Close()
@@ -81,6 +83,25 @@ func TestPatchCategoryGridWidth_Rejects_OutOfRange(t *testing.T) {
 
 	got := getGWCats(t, s.URL, "admin-session")[c.ID]
 	assert.Equal(t, 3, got.GridWidth, "a rejected width must leave the stored value unchanged")
+}
+
+// Amendment A1 — the range widens to 1–8; widths 7 and 8 must now be accepted and
+// persisted (both the API validator AND the DB CHECK must allow them).
+func TestPatchCategoryGridWidth_Accepts_7And8(t *testing.T) {
+	s := testsupport.NewServer(t)
+	defer s.Close()
+
+	c := createCategory(t, s.URL, "admin-session", "Wide")
+
+	for _, w := range []int{7, 8} {
+		resp := doJSON(t, http.MethodPatch, s.URL+"/api/categories/"+c.ID, "admin-session",
+			map[string]any{"gridWidth": w})
+		resp.Body.Close()
+		require.Equal(t, http.StatusOK, resp.StatusCode, "gridWidth %d must be accepted", w)
+
+		got := getGWCats(t, s.URL, "admin-session")[c.ID]
+		assert.Equal(t, w, got.GridWidth, "gridWidth %d must persist", w)
+	}
 }
 
 // A gridWidth-only PATCH must not require or clobber the name, and a name-only
