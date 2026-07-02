@@ -213,7 +213,9 @@ func TestAddFromLibrary_CopiesOfferOntoCallerDashboard(t *testing.T) {
 }
 
 // A11 — add lands Uncategorized by default (D4); a valid own categoryId files
-// it there; another user's / nonexistent categoryId → 400.
+// it there; a categoryId the actor doesn't own → 400. Under SPEC-245-224 the add
+// is admin-only (#36), and the acting admin is the single shared-catalog owner,
+// so the actor throughout is admin-session.
 func TestAddFromLibrary_CategoryRules(t *testing.T) {
 	s := testsupport.NewServer(t)
 	defer s.Close()
@@ -221,25 +223,20 @@ func TestAddFromLibrary_CategoryRules(t *testing.T) {
 	offer := createOffer(t, s.URL, "admin-session", "Jellyfin", "https://jellyfin.example.com")
 
 	// default → Uncategorized
-	sv := decodeService(t, addFromLibrary(t, s.URL, "non-admin-session", offer.ID, nil))
+	sv := decodeService(t, addFromLibrary(t, s.URL, "admin-session", offer.ID, nil))
 	assert.Nil(t, sv.CategoryID, "no body → Uncategorized")
 
 	// own category → filed there (issue #224: category create is admin-only, so
-	// the "files into a category you own" rule is now exercised by the admin — a
-	// non-admin can no longer own a category to file into).
+	// the admin — the shared-catalog owner — both owns the category and adds).
 	mine := createCategory(t, s.URL, "admin-session", "MyMedia")
 	sv2 := decodeService(t, addFromLibrary(t, s.URL, "admin-session", offer.ID, map[string]any{"categoryId": mine.ID}))
 	require.NotNil(t, sv2.CategoryID)
 	assert.Equal(t, mine.ID, *sv2.CategoryID)
 
-	// another user's category → 400
-	foreign := createCategory(t, s.URL, "admin-session", "AdminMedia")
-	r3 := addFromLibrary(t, s.URL, "non-admin-session", offer.ID, map[string]any{"categoryId": foreign.ID})
-	assert.Equal(t, http.StatusBadRequest, r3.StatusCode, "foreign category → 400")
-	r3.Body.Close()
-
-	// nonexistent category → 400
-	r4 := addFromLibrary(t, s.URL, "non-admin-session", offer.ID, map[string]any{"categoryId": "00000000-0000-0000-0000-000000000000"})
+	// a categoryId the actor doesn't own → 400. Under the single-owner shared
+	// model the only unreachable-ownership case is a nonexistent category (no
+	// non-admin can own one to file into), and both map to ErrCategoryNotFound.
+	r4 := addFromLibrary(t, s.URL, "admin-session", offer.ID, map[string]any{"categoryId": "00000000-0000-0000-0000-000000000000"})
 	assert.Equal(t, http.StatusBadRequest, r4.StatusCode, "nonexistent category → 400")
 	r4.Body.Close()
 }

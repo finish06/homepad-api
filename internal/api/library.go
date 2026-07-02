@@ -170,15 +170,15 @@ func (s *server) handleSetLibraryOrder(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// handleAddFromLibrary copies an offer onto the CALLER's own dashboard (A10) and
-// returns the new serviceView. Any authenticated user may add (never 401/403 for
-// a valid session). Optional categoryId must be the caller's own (A11) else 400;
-// absent/null lands Uncategorized (D4). Unknown offer id → 404. Adding twice is
-// allowed and makes a second copy (D6).
+// handleAddFromLibrary copies an offer into the shared catalog (A10) and returns
+// the new serviceView. Admin-only under the shared catalog model (SPEC-245-224,
+// #224): a non-admin session gets 403. The row is owned by the acting admin (the
+// shared-catalog owner). Optional categoryId must be the caller's own (A11) else
+// 400; absent/null lands Uncategorized (D4). Unknown offer id → 404. Adding twice
+// is allowed and makes a second copy (D6).
 func (s *server) handleAddFromLibrary(w http.ResponseWriter, r *http.Request) {
-	u, ok := s.currentUser(r)
+	u, ok := s.requireAdmin(w, r)
 	if !ok {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 	var in struct {
