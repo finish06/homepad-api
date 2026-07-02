@@ -31,6 +31,10 @@ type serviceView struct {
 	// tile sparkline. Always present; [] when the service has no gatus_key or no
 	// cached results. Additive — clients ignoring it are unaffected.
 	UptimeChecks []checkResultView `json:"uptimeChecks"`
+	// UptimeWindows is Gatus's own computed availability per long window
+	// ("24h"/"7d"/"30d"), fraction 0..1. Always present; {} when unmonitored or
+	// no data. A window Gatus couldn't answer is omitted. Additive.
+	UptimeWindows map[string]float64 `json:"uptimeWindows"`
 }
 
 // checkResultView is the wire form of one historical Gatus check.
@@ -94,6 +98,7 @@ func (s *server) handleListServices(w http.ResponseWriter, r *http.Request) {
 			CategoryName:    sv.CategoryName,
 			SourceLibraryID: sv.SourceLibraryID,
 			UptimeChecks:    uptimeChecksFor(snap, sv.GatusKey),
+			UptimeWindows:   uptimeWindowsFor(snap, sv.GatusKey),
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"services": out})
@@ -305,6 +310,24 @@ func uptimeChecksFor(snap gatus.Snapshot, gatusKey string) []checkResultView {
 	}
 	for _, r := range st.Results {
 		out = append(out, checkResultView{Success: r.Success, Timestamp: r.Timestamp})
+	}
+	return out
+}
+
+// uptimeWindowsFor surfaces Gatus's computed long-window uptime for a service's
+// gatus_key. Always returns a non-nil map so the JSON is {} (never null): empty
+// for an unmonitored service or one with no snapshot/uptime data.
+func uptimeWindowsFor(snap gatus.Snapshot, gatusKey string) map[string]float64 {
+	out := map[string]float64{}
+	if gatusKey == "" {
+		return out
+	}
+	st, ok := snap.Statuses[gatusKey]
+	if !ok {
+		return out
+	}
+	for win, v := range st.Uptime {
+		out[win] = v
 	}
 	return out
 }
