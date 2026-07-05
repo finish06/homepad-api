@@ -372,6 +372,25 @@ func (s *Store) serviceOwnedBy(ctx context.Context, serviceID, userID string) er
 	return err
 }
 
+// ServiceURL returns the registered url of one of userID's OWN services (v21
+// fetch-icon). ErrNotFound when id names no service owned by userID (malformed
+// UUID, nonexistent, or another user's row) — same owner scope as PutIcon.
+func (s *Store) ServiceURL(ctx context.Context, serviceID, userID string) (string, error) {
+	var url string
+	err := s.pool.QueryRow(ctx, `SELECT url FROM services WHERE id = $1 AND user_id = $2`, serviceID, userID).Scan(&url)
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "22P02" { // malformed UUID
+		return "", ErrNotFound
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	if err != nil {
+		return "", err
+	}
+	return url, nil
+}
+
 // DeleteService removes one of userID's OWN catalog entries (v9 — owner-scoped).
 // Returns ErrNotFound when id names no service owned by userID (malformed UUID,
 // nonexistent, or another user's row → 404, D2). Favorites/layout/icons cascade.

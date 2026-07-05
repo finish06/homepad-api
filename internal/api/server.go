@@ -70,6 +70,7 @@ func New(d Deps) http.Handler {
 		mux.HandleFunc("GET /api/services/{id}/icon/{variant}", s.handleGetIcon)
 		mux.HandleFunc("PUT /api/services/{id}/icon/{variant}", s.handlePutIcon)
 		mux.HandleFunc("DELETE /api/services/{id}/icon/{variant}", s.handleDeleteIcon)
+		mux.HandleFunc("POST /api/services/{id}/fetch-icon", s.handleFetchIcon)
 		mux.HandleFunc("POST /api/favorites/{id}", s.handleAddFavorite)
 		mux.HandleFunc("DELETE /api/favorites/{id}", s.handleRemoveFavorite)
 		// App Library (v9.2): browse + add are session-gated (any user); CRUD
