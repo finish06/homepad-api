@@ -73,7 +73,7 @@ func TestClickAction_CreateDefaultsNewTab(t *testing.T) {
 	defer s.Close()
 
 	created := createServiceCA(t, s.URL, "admin-session", map[string]any{
-		"slug": "grafana", "name": "Grafana", "url": "https://grafana.example.com",
+		"slug": "ca-newtab", "name": "CA NewTab", "url": "https://grafana.example.com",
 	})
 	assert.Equal(t, "new_tab", created.ClickAction, "create response must carry new_tab default")
 
@@ -87,7 +87,7 @@ func TestClickAction_CreateAcceptsIframe(t *testing.T) {
 	defer s.Close()
 
 	created := createServiceCA(t, s.URL, "admin-session", map[string]any{
-		"slug": "netdata", "name": "Netdata", "url": "https://netdata.example.com",
+		"slug": "ca-iframe", "name": "CA Iframe", "url": "https://netdata.example.com",
 		"clickAction": "iframe",
 	})
 	assert.Equal(t, "iframe", created.ClickAction)
@@ -103,7 +103,7 @@ func TestClickAction_PatchPersists(t *testing.T) {
 	defer s.Close()
 
 	created := createServiceCA(t, s.URL, "admin-session", map[string]any{
-		"slug": "uptime", "name": "Uptime", "url": "https://uptime.example.com",
+		"slug": "ca-persist", "name": "CA Persist", "url": "https://uptime.example.com",
 	})
 
 	resp := doJSON(t, http.MethodPatch, s.URL+"/api/services/"+created.ID, "admin-session",
@@ -123,13 +123,13 @@ func TestClickAction_RejectsInvalidEnum(t *testing.T) {
 
 	// create with a bogus value → 400
 	resp := doJSON(t, http.MethodPost, s.URL+"/api/services", "admin-session",
-		map[string]any{"slug": "bad", "name": "Bad", "url": "https://bad.example.com", "clickAction": "popup"})
+		map[string]any{"slug": "ca-bad", "name": "CA Bad", "url": "https://bad.example.com", "clickAction": "popup"})
 	resp.Body.Close()
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode, "invalid clickAction on create must be 400")
 
 	// a valid create, then a bogus PATCH → 400, value unchanged
 	created := createServiceCA(t, s.URL, "admin-session", map[string]any{
-		"slug": "good", "name": "Good", "url": "https://good.example.com",
+		"slug": "ca-good", "name": "CA Good", "url": "https://good.example.com",
 	})
 	resp = doJSON(t, http.MethodPatch, s.URL+"/api/services/"+created.ID, "admin-session",
 		map[string]any{"clickAction": "overlay"})

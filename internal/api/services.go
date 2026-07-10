@@ -27,6 +27,10 @@ type serviceView struct {
 	// SourceLibraryID is provenance only (v9, C1): the library offer a copy was
 	// added from, null for a custom app. Additive — never changes behavior.
 	SourceLibraryID *string `json:"sourceLibraryId"`
+	// ClickAction (v23) is the tile's click behavior — 'new_tab' | 'same_tab' |
+	// 'iframe'. Always present on the wire (DB default 'new_tab'); a pre-migration
+	// client that omits it is treated as new_tab by the frontend.
+	ClickAction string `json:"clickAction"`
 	// UptimeChecks is the recent Gatus history (≤20, oldest-first) backing the
 	// tile sparkline. Always present; [] when the service has no gatus_key or no
 	// cached results. Additive — clients ignoring it are unaffected.
@@ -35,6 +39,18 @@ type serviceView struct {
 	// ("24h"/"7d"/"30d"), fraction 0..1. Always present; {} when unmonitored or
 	// no data. A window Gatus couldn't answer is omitted. Additive.
 	UptimeWindows map[string]float64 `json:"uptimeWindows"`
+}
+
+// validClickAction reports whether v is one of the three v23 click-action enum
+// values. Empty is a valid input on create (the storage layer applies the DB
+// default 'new_tab'); callers that must reject empty check that separately.
+func validClickAction(v string) bool {
+	switch v {
+	case "", "new_tab", "same_tab", "iframe":
+		return true
+	default:
+		return false
+	}
 }
 
 // checkResultView is the wire form of one historical Gatus check.
@@ -97,6 +113,7 @@ func (s *server) handleListServices(w http.ResponseWriter, r *http.Request) {
 			CategoryID:      sv.CategoryID,
 			CategoryName:    sv.CategoryName,
 			SourceLibraryID: sv.SourceLibraryID,
+			ClickAction:     sv.ClickAction,
 			UptimeChecks:    uptimeChecksFor(snap, sv.GatusKey),
 			UptimeWindows:   uptimeWindowsFor(snap, sv.GatusKey),
 		})
@@ -120,6 +137,7 @@ func (s *server) handleCreateService(w http.ResponseWriter, r *http.Request) {
 		URL         string `json:"url"`
 		Icon        string `json:"icon"`
 		GatusKey    string `json:"gatus_key"`
+		ClickAction string `json:"clickAction"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		http.Error(w, "invalid JSON body", http.StatusBadRequest)
@@ -132,6 +150,12 @@ func (s *server) handleCreateService(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "slug, name and url are required", http.StatusBadRequest)
 		return
 	}
+	// v23 — an omitted clickAction defaults to new_tab in storage; a present but
+	// unknown value is a 400. (§3.2)
+	if !validClickAction(in.ClickAction) {
+		http.Error(w, "clickAction must be one of new_tab, same_tab, iframe", http.StatusBadRequest)
+		return
+	}
 
 	sv, err := s.store.CreateService(r.Context(), u.ID, storage.Service{
 		Slug:        in.Slug,
@@ -140,6 +164,7 @@ func (s *server) handleCreateService(w http.ResponseWriter, r *http.Request) {
 		URL:         in.URL,
 		Icon:        in.Icon,
 		GatusKey:    strings.TrimSpace(in.GatusKey),
+		ClickAction: in.ClickAction,
 	})
 	if errors.Is(err, storage.ErrSlugTaken) {
 		http.Error(w, "a service with that slug already exists", http.StatusConflict)
@@ -158,6 +183,7 @@ func (s *server) handleCreateService(w http.ResponseWriter, r *http.Request) {
 		URL:         sv.URL,
 		Icon:        sv.Icon,
 		Status:      statusFor(s.poller.Snapshot(), sv.GatusKey),
+		ClickAction: sv.ClickAction,
 	})
 }
 
@@ -178,9 +204,16 @@ func (s *server) handleUpdateService(w http.ResponseWriter, r *http.Request) {
 		Icon        *string        `json:"icon"`
 		GatusKey    *string        `json:"gatus_key"`
 		CategoryID  optionalString `json:"categoryId"`
+		ClickAction *string        `json:"clickAction"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		return
+	}
+	// v23 — when clickAction is present it must be a valid enum value (an explicit
+	// empty string is not a valid change; omit the key to leave it unchanged). §3.2
+	if in.ClickAction != nil && (*in.ClickAction == "" || !validClickAction(*in.ClickAction)) {
+		http.Error(w, "clickAction must be one of new_tab, same_tab, iframe", http.StatusBadRequest)
 		return
 	}
 
@@ -193,6 +226,7 @@ func (s *server) handleUpdateService(w http.ResponseWriter, r *http.Request) {
 		GatusKey:    in.GatusKey,
 		SetCategory: in.CategoryID.Set,
 		CategoryID:  in.CategoryID.Value,
+		ClickAction: in.ClickAction,
 	})
 	if errors.Is(err, storage.ErrCategoryNotFound) {
 		http.Error(w, "no such category", http.StatusBadRequest)
@@ -222,6 +256,7 @@ func (s *server) handleUpdateService(w http.ResponseWriter, r *http.Request) {
 		CategoryID:      sv.CategoryID,
 		CategoryName:    sv.CategoryName,
 		SourceLibraryID: sv.SourceLibraryID,
+		ClickAction:     sv.ClickAction,
 	})
 }
 
