@@ -83,6 +83,9 @@ type Service struct {
 	// added from, or nil for a custom app. Set on add-from-library (v9.2) and
 	// by the 0007 cutover; never changes behavior.
 	SourceLibraryID *string
+	// ClickAction (v23) is the tile's click behavior: 'new_tab' | 'same_tab' |
+	// 'iframe'. Always populated — the DB column is NOT NULL DEFAULT 'new_tab'.
+	ClickAction string
 }
 
 // Category is an admin-curated catalog section (v4). Ordering is the explicit
@@ -213,7 +216,7 @@ func (s *Store) SetThemePref(ctx context.Context, userID, pref string) error {
 func (s *Store) ListServices(ctx context.Context, ownerID, viewerID string) ([]Service, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT s.id, s.slug, s.name, s.description, s.url, s.icon, COALESCE(s.gatus_key, ''),
-		        s.category_id, c.name, s.source_library_id
+		        s.category_id, c.name, s.source_library_id, s.click_action
 		   FROM services s
 		   LEFT JOIN user_layout ul ON ul.service_id = s.id AND ul.user_id = $2
 		   LEFT JOIN categories c   ON c.id = s.category_id
@@ -228,7 +231,7 @@ func (s *Store) ListServices(ctx context.Context, ownerID, viewerID string) ([]S
 	for rows.Next() {
 		var sv Service
 		if err := rows.Scan(&sv.ID, &sv.Slug, &sv.Name, &sv.Description, &sv.URL, &sv.Icon, &sv.GatusKey,
-			&sv.CategoryID, &sv.CategoryName, &sv.SourceLibraryID); err != nil {
+			&sv.CategoryID, &sv.CategoryName, &sv.SourceLibraryID, &sv.ClickAction); err != nil {
 			return nil, err
 		}
 		out = append(out, sv)
@@ -244,13 +247,20 @@ func (s *Store) CreateService(ctx context.Context, userID string, in Service) (S
 	if in.GatusKey != "" {
 		gatusKey = &in.GatusKey
 	}
+	// v23: an empty ClickAction rides on the column DEFAULT 'new_tab' (the API
+	// leaves it "" when the caller omits clickAction, or supplies a validated
+	// enum value). COALESCE NULLIF keeps the default authoritative in one place.
+	clickAction := in.ClickAction
+	if clickAction == "" {
+		clickAction = "new_tab"
+	}
 	var sv Service
 	err := s.pool.QueryRow(ctx,
-		`INSERT INTO services (user_id, slug, name, description, url, icon, gatus_key)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7)
-		 RETURNING id, slug, name, description, url, icon, COALESCE(gatus_key, '')`,
-		userID, in.Slug, in.Name, in.Description, in.URL, in.Icon, gatusKey,
-	).Scan(&sv.ID, &sv.Slug, &sv.Name, &sv.Description, &sv.URL, &sv.Icon, &sv.GatusKey)
+		`INSERT INTO services (user_id, slug, name, description, url, icon, gatus_key, click_action)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		 RETURNING id, slug, name, description, url, icon, COALESCE(gatus_key, ''), click_action`,
+		userID, in.Slug, in.Name, in.Description, in.URL, in.Icon, gatusKey, clickAction,
+	).Scan(&sv.ID, &sv.Slug, &sv.Name, &sv.Description, &sv.URL, &sv.Icon, &sv.GatusKey, &sv.ClickAction)
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 		return Service{}, ErrSlugTaken
@@ -276,6 +286,9 @@ type ServiceUpdate struct {
 	// (Uncategorized); SetCategory true with a non-nil id assigns that category.
 	SetCategory bool
 	CategoryID  *string
+	// ClickAction (v23) is nil = leave unchanged; a non-nil pointer sets the tile's
+	// click behavior. The API validates the enum before it reaches here.
+	ClickAction *string
 }
 
 // UpdateService applies a partial patch to userID's OWN service and returns the
@@ -308,19 +321,20 @@ func (s *Store) UpdateService(ctx context.Context, id, userID string, in Service
 		     description = COALESCE($5, description),
 		     url         = COALESCE($6, url),
 		     icon        = COALESCE($7, icon),
-		     gatus_key   = CASE WHEN $8 THEN $9 ELSE gatus_key END,
-		     category_id = CASE WHEN $10 THEN $11 ELSE category_id END,
-		     updated_at  = now()
+		     gatus_key    = CASE WHEN $8 THEN $9 ELSE gatus_key END,
+		     category_id  = CASE WHEN $10 THEN $11 ELSE category_id END,
+		     click_action = COALESCE($12, click_action),
+		     updated_at   = now()
 		   WHERE id = $1 AND user_id = $2
-		   RETURNING id, slug, name, description, url, icon, gatus_key, category_id, source_library_id
+		   RETURNING id, slug, name, description, url, icon, gatus_key, category_id, source_library_id, click_action
 		 )
 		 SELECT u.id, u.slug, u.name, u.description, u.url, u.icon, COALESCE(u.gatus_key, ''),
-		        u.category_id, c.name, u.source_library_id
+		        u.category_id, c.name, u.source_library_id, u.click_action
 		   FROM updated u
 		   LEFT JOIN categories c ON c.id = u.category_id`,
-		id, userID, in.Slug, in.Name, in.Description, in.URL, in.Icon, setGatus, gatusKey, in.SetCategory, in.CategoryID,
+		id, userID, in.Slug, in.Name, in.Description, in.URL, in.Icon, setGatus, gatusKey, in.SetCategory, in.CategoryID, in.ClickAction,
 	).Scan(&sv.ID, &sv.Slug, &sv.Name, &sv.Description, &sv.URL, &sv.Icon, &sv.GatusKey,
-		&sv.CategoryID, &sv.CategoryName, &sv.SourceLibraryID)
+		&sv.CategoryID, &sv.CategoryName, &sv.SourceLibraryID, &sv.ClickAction)
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) {
 		if pgErr.Code == "23505" {
