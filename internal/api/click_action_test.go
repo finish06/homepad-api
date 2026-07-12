@@ -115,6 +115,39 @@ func TestClickAction_PatchPersists(t *testing.T) {
 	assert.Equal(t, "same_tab", got.ClickAction, "clickAction must persist across a re-read")
 }
 
+// #342 — a per-tile launch type changed via the edit-service PATCH must survive a
+// re-fetch (a page reload). The UI's "overlay" launch type is the `iframe` enum
+// value (SPEC-tile-click-action-20260710 §4.2 — the "Inline overlay" option that
+// embeds the service in an overlay panel), so the reported "overlay reverts on
+// reload" symptom is the `iframe` case here. This covers EVERY enum value, not
+// just one, closing the issue's stated test gap. Named for the observed symptom
+// (reverts on reload), not a theorized cause.
+func TestClickAction_AllEnumValuesSurviveReload(t *testing.T) {
+	s := testsupport.NewServer(t)
+	defer s.Close()
+
+	// 'iframe' is the UI's "Inline overlay" launch type — the value in the #342 report.
+	for _, want := range []string{"new_tab", "same_tab", "iframe"} {
+		want := want
+		t.Run(want, func(t *testing.T) {
+			// A fresh service starts at the DB default 'new_tab'.
+			created := createServiceCA(t, s.URL, "admin-session", map[string]any{
+				"slug": "ca-rt-" + want, "name": "CA RT " + want, "url": "https://rt.example.com",
+			})
+
+			// Change the launch type via the same PATCH the edit-service form uses.
+			resp := doJSON(t, http.MethodPatch, s.URL+"/api/services/"+created.ID, "admin-session",
+				map[string]any{"clickAction": want})
+			resp.Body.Close()
+			require.Equal(t, http.StatusOK, resp.StatusCode, "PATCH clickAction=%q must return 200", want)
+
+			// Re-fetch the catalog (what a page reload does) and assert it stuck.
+			got := getServicesCA(t, s.URL, "admin-session")[created.ID]
+			assert.Equal(t, want, got.ClickAction, "clickAction %q must survive a reload (re-fetch)", want)
+		})
+	}
+}
+
 // §3.2 — an invalid enum value is rejected with 400 on both create and update,
 // and nothing is changed.
 func TestClickAction_RejectsInvalidEnum(t *testing.T) {
