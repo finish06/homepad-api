@@ -1,3 +1,20 @@
+# Standardized post-merge build+deploy via Code/ci-shared/staging-release@v3.
+#
+# On push to main (after a PR merges through the mr-staging gate + QA pool), build
+# the image homepad-api:<sha>-beta (+ immutable :<sha>) with Kaniko, push it, and
+# roll it to staging (homepad-staging ns). No test gate / no re-QA — the PR was
+# already gated by mr-staging + CI, and main is branch-protected.
+#
+# HISTORY: this deploy-cmd used to be a no-op `echo` on the (stale) assumption that
+# homepad-api had "no CI-reachable staging target", so merges built+pushed the image
+# but never advanced staging — the run went GREEN while staging stayed pinned to an
+# old pod until it was hand-rolled. That assumption is false: homelab
+# homepad-staging/02-api.yaml defines a live `homepad-api` Deployment (container
+# `api`), and the shared ci-deployer SA behind KUBECONFIG_STAGING can patch it (the
+# same secret homepad-web's staging-release uses to roll deploy/homepad-web in this
+# very namespace). We now do a real `kubectl set image` + `rollout status`, which
+# under the action's `set -euo pipefail` fails the run LOUD if the deploy breaks —
+# no more silent green.
 name: main -> staging release
 on:
   push:
@@ -10,10 +27,23 @@ jobs:
         with:
           image-name: homepad-api
           deploy-cmd: |
-            # STAGING-LESS: homepad-api has no CI-reachable staging deployment
-            # target. The image :<sha>-beta (+:<sha>) is built and pushed to the
-            # registry; Joe repoints prod to the fresh tag (Option 1). No :latest.
-            echo "No CI-reachable staging target for homepad-api — image pushed; nothing to deploy."
+            # Fail LOUD (not with an opaque kubectl error) if the staging kubeconfig
+            # secret is missing/empty — a silent-green deploy is exactly the bug this
+            # replaced.
+            if [ -z "${KUBECONFIG_STAGING:-}" ]; then
+              echo "::error::KUBECONFIG_STAGING is empty — cannot deploy homepad-api to staging"
+              exit 1
+            fi
+            printf '%s' "$KUBECONFIG_STAGING" > /tmp/kc && export KUBECONFIG=/tmp/kc
+            # catthehacker runner image ships no kubectl — install the pinned binary.
+            if ! command -v kubectl >/dev/null 2>&1; then
+              curl -sSLf -o /usr/local/bin/kubectl https://dl.k8s.io/release/v1.30.2/bin/linux/amd64/kubectl
+              chmod +x /usr/local/bin/kubectl
+            fi
+            echo "Rolling deploy/homepad-api in homepad-staging to $IMAGE_REF"
+            kubectl -n homepad-staging set image deploy/homepad-api api="$IMAGE_REF"
+            kubectl -n homepad-staging rollout status deploy/homepad-api --timeout=120s
         env:
-          REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
-          REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
+          REGISTRY_USERNAME:  ${{ secrets.REGISTRY_USERNAME }}
+          REGISTRY_PASSWORD:  ${{ secrets.REGISTRY_PASSWORD }}
+          KUBECONFIG_STAGING: ${{ secrets.KUBECONFIG_STAGING }}
