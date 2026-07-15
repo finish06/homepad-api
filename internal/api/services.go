@@ -31,6 +31,11 @@ type serviceView struct {
 	// 'iframe'. Always present on the wire (DB default 'new_tab'); a pre-migration
 	// client that omits it is treated as new_tab by the frontend.
 	ClickAction string `json:"clickAction"`
+	// GatusKey (v25) is the Gatus endpoint slug backing the tile's health meter,
+	// "" when the tile is unmonitored. Always present on the wire so the
+	// TileEditModal can prefill the current key. Additive — clients ignoring it
+	// are unaffected; it never changes behavior (Status carries the resolved badge).
+	GatusKey string `json:"gatus_key"`
 	// UptimeChecks is the recent Gatus history (≤20, oldest-first) backing the
 	// tile sparkline. Always present; [] when the service has no gatus_key or no
 	// cached results. Additive — clients ignoring it are unaffected.
@@ -114,6 +119,7 @@ func (s *server) handleListServices(w http.ResponseWriter, r *http.Request) {
 			CategoryName:    sv.CategoryName,
 			SourceLibraryID: sv.SourceLibraryID,
 			ClickAction:     sv.ClickAction,
+			GatusKey:        sv.GatusKey,
 			UptimeChecks:    uptimeChecksFor(snap, sv.GatusKey),
 			UptimeWindows:   uptimeWindowsFor(snap, sv.GatusKey),
 		})
@@ -257,6 +263,7 @@ func (s *server) handleUpdateService(w http.ResponseWriter, r *http.Request) {
 		CategoryName:    sv.CategoryName,
 		SourceLibraryID: sv.SourceLibraryID,
 		ClickAction:     sv.ClickAction,
+		GatusKey:        sv.GatusKey,
 	})
 }
 
