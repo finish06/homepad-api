@@ -1,362 +1,418 @@
 [
   {
-    "name": "Pangolin API",
-    "slug": "pangolinapi",
-    "url": "https://pangolin.calebdunn.tech",
-    "description": "external",
-    "icon": "",
-    "gatus_key": "external_pangolin-api"
-  },
-  {
-    "name": "PocketID",
-    "slug": "pocketid",
-    "url": "https://id.calebdunn.tech",
-    "description": "external",
-    "icon": "",
-    "gatus_key": "external_pocketid"
-  },
-  {
-    "name": "Alertmanager",
-    "slug": "alertmanager",
-    "url": "https://alertmanager.kube.calebdunn.tech",
-    "description": "kube",
-    "icon": "",
-    "gatus_key": "kube_alertmanager"
-  },
-  {
-    "name": "ArchiveTeam Warrior1",
-    "slug": "archiveteamwarrior1",
-    "url": "https://warrior1.kube.calebdunn.tech",
-    "description": "kube",
-    "icon": "",
-    "gatus_key": "kube_archiveteam-warrior1"
-  },
-  {
-    "name": "ArchiveTeam Warrior2",
-    "slug": "archiveteamwarrior2",
-    "url": "https://warrior2.kube.calebdunn.tech",
-    "description": "kube",
-    "icon": "",
-    "gatus_key": "kube_archiveteam-warrior2"
-  },
-  {
-    "name": "Cash Drugs",
-    "slug": "cashdrugs",
-    "url": "https://cash-drugs.kube.calebdunn.tech",
-    "description": "kube",
-    "icon": "",
-    "gatus_key": "kube_cash-drugs"
-  },
-  {
-    "name": "Dashlet",
-    "slug": "dashlet",
-    "url": "https://dashlet.kube.calebdunn.tech",
-    "description": "kube",
-    "icon": "",
-    "gatus_key": "kube_dashlet-k8s"
-  },
-  {
-    "name": "Databasus",
-    "slug": "databasus",
-    "url": "https://databasus.kube.calebdunn.tech",
-    "description": "kube",
-    "icon": "",
-    "gatus_key": "kube_databasus-k8s"
-  },
-  {
-    "name": "Dozzle",
-    "slug": "dozzle",
-    "url": "https://dozzle.kube.calebdunn.tech",
-    "description": "kube",
-    "icon": "",
-    "gatus_key": "kube_dozzle-k8s"
-  },
-  {
-    "name": "Dustpan",
-    "slug": "dustpan",
-    "url": "https://dustpan.kube.calebdunn.tech",
-    "description": "kube",
-    "icon": "",
-    "gatus_key": "kube_dustpan"
-  },
-  {
-    "name": "Filebrowser",
-    "slug": "filebrowser",
-    "url": "https://files.kube.calebdunn.tech",
-    "description": "kube",
-    "icon": "",
-    "gatus_key": "kube_filebrowser"
-  },
-  {
-    "name": "Gatus",
-    "slug": "gatus",
-    "url": "https://gatus.kube.calebdunn.tech",
-    "description": "kube",
-    "icon": "",
-    "gatus_key": "kube_gatus"
-  },
-  {
-    "name": "Gitea",
-    "slug": "gitea",
-    "url": "https://gitea.kube.calebdunn.tech",
-    "description": "kube",
-    "icon": "",
-    "gatus_key": "kube_gitea-k8s"
-  },
-  {
     "name": "Grafana",
     "slug": "grafana",
-    "url": "https://grafana.kube.calebdunn.tech",
-    "description": "kube",
+    "url": "https://grafana.com",
+    "description": "Monitoring",
     "icon": "",
-    "gatus_key": "kube_grafana-k8s"
-  },
-  {
-    "name": "Kite",
-    "slug": "kite",
-    "url": "https://kite.kube.calebdunn.tech",
-    "description": "kube",
-    "icon": "",
-    "gatus_key": "kube_kite"
-  },
-  {
-    "name": "Liwan",
-    "slug": "liwan",
-    "url": "https://liwan.calebdunn.tech",
-    "description": "kube",
-    "icon": "",
-    "gatus_key": "kube_liwan"
-  },
-  {
-    "name": "Longhorn",
-    "slug": "longhorn",
-    "url": "https://longhorn.kube.calebdunn.tech",
-    "description": "kube",
-    "icon": "",
-    "gatus_key": "kube_longhorn"
-  },
-  {
-    "name": "Mealie",
-    "slug": "mealie",
-    "url": "https://mealie.kube.calebdunn.tech",
-    "description": "kube",
-    "icon": "",
-    "gatus_key": "kube_mealie"
-  },
-  {
-    "name": "NATS Publish Bridge",
-    "slug": "natspublishbridge",
-    "url": "https://nats-publish.kube.calebdunn.tech",
-    "description": "kube",
-    "icon": "",
-    "gatus_key": "kube_nats-publish-bridge"
-  },
-  {
-    "name": "NDC Loader",
-    "slug": "ndcloader",
-    "url": "https://ndc-loader.kube.calebdunn.tech",
-    "description": "kube",
-    "icon": "",
-    "gatus_key": "kube_ndc-loader"
-  },
-  {
-    "name": "pgAdmin",
-    "slug": "pgadmin",
-    "url": "https://pgadmin.kube.calebdunn.tech",
-    "description": "kube",
-    "icon": "",
-    "gatus_key": "kube_pgadmin"
-  },
-  {
-    "name": "pinchflat",
-    "slug": "pinchflat",
-    "url": "https://pinchflat.kube.calebdunn.tech",
-    "description": "kube",
-    "icon": "",
-    "gatus_key": "kube_pinchflat"
+    "gatus_key": ""
   },
   {
     "name": "Prometheus",
     "slug": "prometheus",
-    "url": "https://prometheus.kube.calebdunn.tech",
-    "description": "kube",
-    "icon": "",
-    "gatus_key": "kube_prometheus"
-  },
-  {
-    "name": "Readarr",
-    "slug": "readarr",
-    "url": "https://readarr.kube.calebdunn.tech",
-    "description": "kube",
-    "icon": "",
-    "gatus_key": "kube_readarr"
-  },
-  {
-    "name": "Rsync Viewer",
-    "slug": "rsyncviewer",
-    "url": "https://rsync-viewer.kube.calebdunn.tech",
-    "description": "kube",
-    "icon": "",
-    "gatus_key": "kube_rsync-viewer"
-  },
-  {
-    "name": "TeslaGrafana",
-    "slug": "teslagrafana",
-    "url": "https://tesla-grafana.kube.calebdunn.tech",
-    "description": "kube",
-    "icon": "",
-    "gatus_key": "kube_teslagrafana"
-  },
-  {
-    "name": "Teslamate",
-    "slug": "teslamate",
-    "url": "https://teslamate.kube.calebdunn.tech",
-    "description": "kube",
-    "icon": "",
-    "gatus_key": "kube_teslamate"
-  },
-  {
-    "name": "Umami",
-    "slug": "umami",
-    "url": "https://umami.calebdunn.tech",
-    "description": "kube",
-    "icon": "",
-    "gatus_key": "kube_umami"
-  },
-  {
-    "name": "airdcpp",
-    "slug": "airdcpp",
-    "url": "https://airdcpp.kube.calebdunn.tech",
-    "description": "media",
-    "icon": "",
-    "gatus_key": "media_airdcpp"
-  },
-  {
-    "name": "autobrr",
-    "slug": "autobrr",
-    "url": "https://autobrr.kube.calebdunn.tech",
-    "description": "media",
-    "icon": "",
-    "gatus_key": "media_autobrr"
-  },
-  {
-    "name": "bazarr",
-    "slug": "bazarr",
-    "url": "https://bazarr.kube.calebdunn.tech",
-    "description": "media",
-    "icon": "",
-    "gatus_key": "media_bazarr"
-  },
-  {
-    "name": "boxarr",
-    "slug": "boxarr",
-    "url": "https://boxarr.kube.calebdunn.tech",
-    "description": "media",
-    "icon": "",
-    "gatus_key": "media_boxarr"
-  },
-  {
-    "name": "lidarr",
-    "slug": "lidarr",
-    "url": "https://lidarr.kube.calebdunn.tech",
-    "description": "media",
-    "icon": "",
-    "gatus_key": "media_lidarr"
-  },
-  {
-    "name": "mylar",
-    "slug": "mylar",
-    "url": "https://mylar.kube.calebdunn.tech",
-    "description": "media",
-    "icon": "",
-    "gatus_key": "media_mylar"
-  },
-  {
-    "name": "prowlarr",
-    "slug": "prowlarr",
-    "url": "https://prowlarr.kube.calebdunn.tech",
-    "description": "media",
-    "icon": "",
-    "gatus_key": "media_prowlarr"
-  },
-  {
-    "name": "qBittorrent",
-    "slug": "qbittorrent",
-    "url": "https://qbit.calebdunn.tech",
-    "description": "media",
-    "icon": "",
-    "gatus_key": "media_qbittorrent"
-  },
-  {
-    "name": "radarr",
-    "slug": "radarr",
-    "url": "https://radarr.kube.calebdunn.tech",
-    "description": "media",
-    "icon": "",
-    "gatus_key": "media_radarr"
-  },
-  {
-    "name": "sonarr",
-    "slug": "sonarr",
-    "url": "https://sonarr.kube.calebdunn.tech",
-    "description": "media",
-    "icon": "",
-    "gatus_key": "media_sonarr"
-  },
-  {
-    "name": "Joe Learns",
-    "slug": "joelearns",
-    "url": "https://joe.calebdunn.tech",
-    "description": "kube",
-    "icon": "",
-    "gatus_key": "kube_joe-learns-frontend"
-  },
-  {
-    "name": "Fleet Feed",
-    "slug": "fleetfeed",
-    "url": "https://fleet-feed.kube.calebdunn.tech",
-    "description": "Friends",
+    "url": "https://prometheus.io",
+    "description": "Monitoring",
     "icon": "",
     "gatus_key": ""
   },
   {
-    "name": "Stitch",
-    "slug": "stitchtty",
-    "url": "https://stitch.kube.calebdunn.tech",
-    "description": "Friends",
-    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/terminal.png",
+    "name": "Uptime Kuma",
+    "slug": "uptimekuma",
+    "url": "https://uptime.kuma.pet",
+    "description": "Monitoring",
+    "icon": "",
     "gatus_key": ""
   },
   {
-    "name": "Gracie",
-    "slug": "gracietty",
-    "url": "https://gracie.kube.calebdunn.tech",
-    "description": "Friends",
-    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/terminal.png",
+    "name": "Dozzle",
+    "slug": "dozzle",
+    "url": "https://dozzle.dev",
+    "description": "Monitoring",
+    "icon": "",
     "gatus_key": ""
   },
   {
-    "name": "Walt",
-    "slug": "walttty",
-    "url": "https://walt.kube.calebdunn.tech",
-    "description": "Friends",
-    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/terminal.png",
+    "name": "Beszel",
+    "slug": "beszel",
+    "url": "https://beszel.dev",
+    "description": "Monitoring",
+    "icon": "",
     "gatus_key": ""
   },
   {
-    "name": "Ada",
-    "slug": "adatty",
-    "url": "https://ada.kube.calebdunn.tech",
-    "description": "Friends",
-    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/terminal.png",
+    "name": "Netdata",
+    "slug": "netdata",
+    "url": "https://www.netdata.cloud",
+    "description": "Monitoring",
+    "icon": "",
     "gatus_key": ""
   },
   {
-    "name": "Murph",
-    "slug": "murphtty",
-    "url": "https://murph.kube.calebdunn.tech",
-    "description": "Friends",
-    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/terminal.png",
+    "name": "Homepage",
+    "slug": "homepage",
+    "url": "https://gethomepage.dev",
+    "description": "Dashboards",
+    "icon": "",
+    "gatus_key": ""
+  },
+  {
+    "name": "Homarr",
+    "slug": "homarr",
+    "url": "https://homarr.dev",
+    "description": "Dashboards",
+    "icon": "",
+    "gatus_key": ""
+  },
+  {
+    "name": "Dashy",
+    "slug": "dashy",
+    "url": "https://dashy.to",
+    "description": "Dashboards",
+    "icon": "",
+    "gatus_key": ""
+  },
+  {
+    "name": "Immich",
+    "slug": "immich",
+    "url": "https://immich.app",
+    "description": "Photos",
+    "icon": "",
+    "gatus_key": ""
+  },
+  {
+    "name": "PhotoPrism",
+    "slug": "photoprism",
+    "url": "https://www.photoprism.app",
+    "description": "Photos",
+    "icon": "",
+    "gatus_key": ""
+  },
+  {
+    "name": "Ente",
+    "slug": "ente",
+    "url": "https://ente.io",
+    "description": "Photos",
+    "icon": "",
+    "gatus_key": ""
+  },
+  {
+    "name": "Jellyfin",
+    "slug": "jellyfin",
+    "url": "https://jellyfin.org",
+    "description": "Media",
+    "icon": "",
+    "gatus_key": ""
+  },
+  {
+    "name": "Plex",
+    "slug": "plex",
+    "url": "https://www.plex.tv",
+    "description": "Media",
+    "icon": "",
+    "gatus_key": ""
+  },
+  {
+    "name": "Emby",
+    "slug": "emby",
+    "url": "https://emby.media",
+    "description": "Media",
+    "icon": "",
+    "gatus_key": ""
+  },
+  {
+    "name": "Navidrome",
+    "slug": "navidrome",
+    "url": "https://www.navidrome.org",
+    "description": "Media",
+    "icon": "",
+    "gatus_key": ""
+  },
+  {
+    "name": "Audiobookshelf",
+    "slug": "audiobookshelf",
+    "url": "https://www.audiobookshelf.org",
+    "description": "Media",
+    "icon": "",
+    "gatus_key": ""
+  },
+  {
+    "name": "Paperless-ngx",
+    "slug": "paperlessngx",
+    "url": "https://docs.paperless-ngx.com",
+    "description": "Documents",
+    "icon": "",
+    "gatus_key": ""
+  },
+  {
+    "name": "Outline",
+    "slug": "outline",
+    "url": "https://www.getoutline.com",
+    "description": "Documents",
+    "icon": "",
+    "gatus_key": ""
+  },
+  {
+    "name": "BookStack",
+    "slug": "bookstack",
+    "url": "https://www.bookstackapp.com",
+    "description": "Documents",
+    "icon": "",
+    "gatus_key": ""
+  },
+  {
+    "name": "Joplin",
+    "slug": "joplin",
+    "url": "https://joplinapp.org",
+    "description": "Documents",
+    "icon": "",
+    "gatus_key": ""
+  },
+  {
+    "name": "Docmost",
+    "slug": "docmost",
+    "url": "https://docmost.com",
+    "description": "Documents",
+    "icon": "",
+    "gatus_key": ""
+  },
+  {
+    "name": "Nextcloud",
+    "slug": "nextcloud",
+    "url": "https://nextcloud.com",
+    "description": "Files",
+    "icon": "",
+    "gatus_key": ""
+  },
+  {
+    "name": "Syncthing",
+    "slug": "syncthing",
+    "url": "https://syncthing.net",
+    "description": "Files",
+    "icon": "",
+    "gatus_key": ""
+  },
+  {
+    "name": "Seafile",
+    "slug": "seafile",
+    "url": "https://www.seafile.com",
+    "description": "Files",
+    "icon": "",
+    "gatus_key": ""
+  },
+  {
+    "name": "File Browser",
+    "slug": "filebrowser",
+    "url": "https://filebrowser.org",
+    "description": "Files",
+    "icon": "",
+    "gatus_key": ""
+  },
+  {
+    "name": "Home Assistant",
+    "slug": "homeassistant",
+    "url": "https://www.home-assistant.io",
+    "description": "Home Automation",
+    "icon": "",
+    "gatus_key": ""
+  },
+  {
+    "name": "ESPHome",
+    "slug": "esphome",
+    "url": "https://esphome.io",
+    "description": "Home Automation",
+    "icon": "",
+    "gatus_key": ""
+  },
+  {
+    "name": "Node-RED",
+    "slug": "nodered",
+    "url": "https://nodered.org",
+    "description": "Home Automation",
+    "icon": "",
+    "gatus_key": ""
+  },
+  {
+    "name": "Zigbee2MQTT",
+    "slug": "zigbee2mqtt",
+    "url": "https://www.zigbee2mqtt.io",
+    "description": "Home Automation",
+    "icon": "",
+    "gatus_key": ""
+  },
+  {
+    "name": "Pi-hole",
+    "slug": "pihole",
+    "url": "https://pi-hole.net",
+    "description": "Networking",
+    "icon": "",
+    "gatus_key": ""
+  },
+  {
+    "name": "AdGuard Home",
+    "slug": "adguardhome",
+    "url": "https://adguard.com/en/adguard-home/overview.html",
+    "description": "Networking",
+    "icon": "",
+    "gatus_key": ""
+  },
+  {
+    "name": "Traefik",
+    "slug": "traefik",
+    "url": "https://traefik.io",
+    "description": "Networking",
+    "icon": "",
+    "gatus_key": ""
+  },
+  {
+    "name": "Nginx Proxy Manager",
+    "slug": "nginxproxymanager",
+    "url": "https://nginxproxymanager.com",
+    "description": "Networking",
+    "icon": "",
+    "gatus_key": ""
+  },
+  {
+    "name": "Tailscale",
+    "slug": "tailscale",
+    "url": "https://tailscale.com",
+    "description": "Networking",
+    "icon": "",
+    "gatus_key": ""
+  },
+  {
+    "name": "Authentik",
+    "slug": "authentik",
+    "url": "https://goauthentik.io",
+    "description": "Identity",
+    "icon": "",
+    "gatus_key": ""
+  },
+  {
+    "name": "Keycloak",
+    "slug": "keycloak",
+    "url": "https://www.keycloak.org",
+    "description": "Identity",
+    "icon": "",
+    "gatus_key": ""
+  },
+  {
+    "name": "Authelia",
+    "slug": "authelia",
+    "url": "https://www.authelia.com",
+    "description": "Identity",
+    "icon": "",
+    "gatus_key": ""
+  },
+  {
+    "name": "Pocket ID",
+    "slug": "pocketid",
+    "url": "https://pocket-id.org",
+    "description": "Identity",
+    "icon": "",
+    "gatus_key": ""
+  },
+  {
+    "name": "Vikunja",
+    "slug": "vikunja",
+    "url": "https://vikunja.io",
+    "description": "Productivity",
+    "icon": "",
+    "gatus_key": ""
+  },
+  {
+    "name": "Actual Budget",
+    "slug": "actualbudget",
+    "url": "https://actualbudget.org",
+    "description": "Productivity",
+    "icon": "",
+    "gatus_key": ""
+  },
+  {
+    "name": "Mealie",
+    "slug": "mealie",
+    "url": "https://mealie.io",
+    "description": "Productivity",
+    "icon": "",
+    "gatus_key": ""
+  },
+  {
+    "name": "Firefly III",
+    "slug": "fireflyiii",
+    "url": "https://www.firefly-iii.org",
+    "description": "Productivity",
+    "icon": "",
+    "gatus_key": ""
+  },
+  {
+    "name": "n8n",
+    "slug": "n8n",
+    "url": "https://n8n.io",
+    "description": "Productivity",
+    "icon": "",
+    "gatus_key": ""
+  },
+  {
+    "name": "Gitea",
+    "slug": "gitea",
+    "url": "https://gitea.com",
+    "description": "Development",
+    "icon": "",
+    "gatus_key": ""
+  },
+  {
+    "name": "Forgejo",
+    "slug": "forgejo",
+    "url": "https://forgejo.org",
+    "description": "Development",
+    "icon": "",
+    "gatus_key": ""
+  },
+  {
+    "name": "Coder",
+    "slug": "coder",
+    "url": "https://coder.com",
+    "description": "Development",
+    "icon": "",
+    "gatus_key": ""
+  },
+  {
+    "name": "Woodpecker CI",
+    "slug": "woodpeckerci",
+    "url": "https://woodpecker-ci.org",
+    "description": "Development",
+    "icon": "",
+    "gatus_key": ""
+  },
+  {
+    "name": "Duplicati",
+    "slug": "duplicati",
+    "url": "https://www.duplicati.com",
+    "description": "Backup",
+    "icon": "",
+    "gatus_key": ""
+  },
+  {
+    "name": "Kopia",
+    "slug": "kopia",
+    "url": "https://kopia.io",
+    "description": "Backup",
+    "icon": "",
+    "gatus_key": ""
+  },
+  {
+    "name": "Restic",
+    "slug": "restic",
+    "url": "https://restic.net",
+    "description": "Backup",
+    "icon": "",
+    "gatus_key": ""
+  },
+  {
+    "name": "Portainer",
+    "slug": "portainer",
+    "url": "https://www.portainer.io",
+    "description": "Backup",
+    "icon": "",
     "gatus_key": ""
   }
 ]
