@@ -1,0 +1,366 @@
+[
+  {
+    "name": "Grafana",
+    "url": "https://grafana.com",
+    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/grafana.png",
+    "description": "Dashboards and visualization for metrics and logs",
+    "category": "Monitoring"
+  },
+  {
+    "name": "Prometheus",
+    "url": "https://prometheus.io",
+    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/prometheus.png",
+    "description": "Time-series metrics collection and alerting",
+    "category": "Monitoring"
+  },
+  {
+    "name": "Uptime Kuma",
+    "url": "https://uptime.kuma.pet",
+    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/uptime-kuma.png",
+    "description": "Self-hosted uptime and status-page monitor",
+    "category": "Monitoring"
+  },
+  {
+    "name": "Dozzle",
+    "url": "https://dozzle.dev",
+    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/dozzle.png",
+    "description": "Real-time Docker container logs in the browser",
+    "category": "Monitoring"
+  },
+  {
+    "name": "Beszel",
+    "url": "https://beszel.dev",
+    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/beszel.png",
+    "description": "Lightweight server and container resource monitor",
+    "category": "Monitoring"
+  },
+  {
+    "name": "Netdata",
+    "url": "https://www.netdata.cloud",
+    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/netdata.png",
+    "description": "Real-time per-second infrastructure monitoring",
+    "category": "Monitoring"
+  },
+  {
+    "name": "Homepage",
+    "url": "https://gethomepage.dev",
+    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/homepage.png",
+    "description": "Static, fast, proxied application dashboard",
+    "category": "Dashboards"
+  },
+  {
+    "name": "Homarr",
+    "url": "https://homarr.dev",
+    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/homarr.png",
+    "description": "Simple powerful dashboard for your server",
+    "category": "Dashboards"
+  },
+  {
+    "name": "Dashy",
+    "url": "https://dashy.to",
+    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/dashy.png",
+    "description": "Customizable privacy-respecting homelab homepage",
+    "category": "Dashboards"
+  },
+  {
+    "name": "Immich",
+    "url": "https://immich.app",
+    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/immich.png",
+    "description": "Self-hosted photo and video backup",
+    "category": "Photos"
+  },
+  {
+    "name": "PhotoPrism",
+    "url": "https://www.photoprism.app",
+    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/photoprism.png",
+    "description": "AI-powered photo management and browsing",
+    "category": "Photos"
+  },
+  {
+    "name": "Ente",
+    "url": "https://ente.io",
+    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/ente.png",
+    "description": "End-to-end encrypted photo storage and backup",
+    "category": "Photos"
+  },
+  {
+    "name": "Jellyfin",
+    "url": "https://jellyfin.org",
+    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/jellyfin.png",
+    "description": "Free open-source media streaming server",
+    "category": "Media"
+  },
+  {
+    "name": "Plex",
+    "url": "https://www.plex.tv",
+    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/plex.png",
+    "description": "Organize and stream your media library",
+    "category": "Media"
+  },
+  {
+    "name": "Emby",
+    "url": "https://emby.media",
+    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/emby.png",
+    "description": "Personal media server for video, music, photos",
+    "category": "Media"
+  },
+  {
+    "name": "Navidrome",
+    "url": "https://www.navidrome.org",
+    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/navidrome.png",
+    "description": "Self-hosted personal music streaming service",
+    "category": "Media"
+  },
+  {
+    "name": "Audiobookshelf",
+    "url": "https://www.audiobookshelf.org",
+    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/audiobookshelf.png",
+    "description": "Self-hosted audiobook and podcast server",
+    "category": "Media"
+  },
+  {
+    "name": "Paperless-ngx",
+    "url": "https://docs.paperless-ngx.com",
+    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/paperless-ngx.png",
+    "description": "Scan, index and archive your documents",
+    "category": "Documents"
+  },
+  {
+    "name": "Outline",
+    "url": "https://www.getoutline.com",
+    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/outline.png",
+    "description": "Team knowledge base and wiki",
+    "category": "Documents"
+  },
+  {
+    "name": "BookStack",
+    "url": "https://www.bookstackapp.com",
+    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/bookstack.png",
+    "description": "Self-hosted documentation and wiki platform",
+    "category": "Documents"
+  },
+  {
+    "name": "Joplin",
+    "url": "https://joplinapp.org",
+    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/joplin.png",
+    "description": "Open-source encrypted note-taking app",
+    "category": "Documents"
+  },
+  {
+    "name": "Docmost",
+    "url": "https://docmost.com",
+    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/docmost.png",
+    "description": "Collaborative wiki and documentation for teams",
+    "category": "Documents"
+  },
+  {
+    "name": "Nextcloud",
+    "url": "https://nextcloud.com",
+    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/nextcloud.png",
+    "description": "Self-hosted file sync, share and collaboration",
+    "category": "Files"
+  },
+  {
+    "name": "Syncthing",
+    "url": "https://syncthing.net",
+    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/syncthing.png",
+    "description": "Continuous peer-to-peer file synchronization",
+    "category": "Files"
+  },
+  {
+    "name": "Seafile",
+    "url": "https://www.seafile.com",
+    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/seafile.png",
+    "description": "High-performance file sync and share platform",
+    "category": "Files"
+  },
+  {
+    "name": "File Browser",
+    "url": "https://filebrowser.org",
+    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/filebrowser.png",
+    "description": "Web file manager for your storage",
+    "category": "Files"
+  },
+  {
+    "name": "Home Assistant",
+    "url": "https://www.home-assistant.io",
+    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/home-assistant.png",
+    "description": "Open-source home automation hub",
+    "category": "Home Automation"
+  },
+  {
+    "name": "ESPHome",
+    "url": "https://esphome.io",
+    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/esphome.png",
+    "description": "YAML-configured firmware for ESP smart devices",
+    "category": "Home Automation"
+  },
+  {
+    "name": "Node-RED",
+    "url": "https://nodered.org",
+    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/node-red.png",
+    "description": "Flow-based wiring for events and devices",
+    "category": "Home Automation"
+  },
+  {
+    "name": "Zigbee2MQTT",
+    "url": "https://www.zigbee2mqtt.io",
+    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/zigbee2mqtt.png",
+    "description": "Bridge Zigbee devices to MQTT",
+    "category": "Home Automation"
+  },
+  {
+    "name": "Pi-hole",
+    "url": "https://pi-hole.net",
+    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/pi-hole.png",
+    "description": "Network-wide DNS ad blocking",
+    "category": "Networking"
+  },
+  {
+    "name": "AdGuard Home",
+    "url": "https://adguard.com/en/adguard-home/overview.html",
+    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/adguard-home.png",
+    "description": "Network-wide ad and tracker blocking DNS",
+    "category": "Networking"
+  },
+  {
+    "name": "Traefik",
+    "url": "https://traefik.io",
+    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/traefik.png",
+    "description": "Cloud-native reverse proxy and load balancer",
+    "category": "Networking"
+  },
+  {
+    "name": "Nginx Proxy Manager",
+    "url": "https://nginxproxymanager.com",
+    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/nginx-proxy-manager.png",
+    "description": "Reverse proxy with easy SSL management",
+    "category": "Networking"
+  },
+  {
+    "name": "Tailscale",
+    "url": "https://tailscale.com",
+    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/tailscale.png",
+    "description": "Zero-config WireGuard mesh VPN",
+    "category": "Networking"
+  },
+  {
+    "name": "Authentik",
+    "url": "https://goauthentik.io",
+    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/authentik.png",
+    "description": "Self-hosted identity provider and SSO",
+    "category": "Identity"
+  },
+  {
+    "name": "Keycloak",
+    "url": "https://www.keycloak.org",
+    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/keycloak.png",
+    "description": "Open-source identity and access management",
+    "category": "Identity"
+  },
+  {
+    "name": "Authelia",
+    "url": "https://www.authelia.com",
+    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/authelia.png",
+    "description": "Authentication and SSO portal for reverse proxies",
+    "category": "Identity"
+  },
+  {
+    "name": "Pocket ID",
+    "url": "https://pocket-id.org",
+    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/pocket-id.png",
+    "description": "Passwordless OIDC provider using passkeys",
+    "category": "Identity"
+  },
+  {
+    "name": "Vikunja",
+    "url": "https://vikunja.io",
+    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/vikunja.png",
+    "description": "Self-hostable to-do and task management app",
+    "category": "Productivity"
+  },
+  {
+    "name": "Actual Budget",
+    "url": "https://actualbudget.org",
+    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/actual-budget.png",
+    "description": "Fast privacy-focused envelope budgeting",
+    "category": "Productivity"
+  },
+  {
+    "name": "Mealie",
+    "url": "https://mealie.io",
+    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/mealie.png",
+    "description": "Recipe management and meal planning",
+    "category": "Productivity"
+  },
+  {
+    "name": "Firefly III",
+    "url": "https://www.firefly-iii.org",
+    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/firefly-iii.png",
+    "description": "Personal finance manager and budgeting",
+    "category": "Productivity"
+  },
+  {
+    "name": "n8n",
+    "url": "https://n8n.io",
+    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/n8n.png",
+    "description": "Workflow automation and integration platform",
+    "category": "Productivity"
+  },
+  {
+    "name": "Gitea",
+    "url": "https://gitea.com",
+    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/gitea.png",
+    "description": "Lightweight self-hosted Git service",
+    "category": "Development"
+  },
+  {
+    "name": "Forgejo",
+    "url": "https://forgejo.org",
+    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/forgejo.png",
+    "description": "Community-driven self-hosted Git forge",
+    "category": "Development"
+  },
+  {
+    "name": "Coder",
+    "url": "https://coder.com",
+    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/coder.png",
+    "description": "Self-hosted cloud development environments",
+    "category": "Development"
+  },
+  {
+    "name": "Woodpecker CI",
+    "url": "https://woodpecker-ci.org",
+    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/woodpecker-ci.png",
+    "description": "Simple extensible CI/CD engine",
+    "category": "Development"
+  },
+  {
+    "name": "Duplicati",
+    "url": "https://www.duplicati.com",
+    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/duplicati.png",
+    "description": "Encrypted incremental backups to any storage",
+    "category": "Backup"
+  },
+  {
+    "name": "Kopia",
+    "url": "https://kopia.io",
+    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/kopia.png",
+    "description": "Fast encrypted deduplicated backup software",
+    "category": "Backup"
+  },
+  {
+    "name": "Restic",
+    "url": "https://restic.net",
+    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/restic.png",
+    "description": "Fast secure efficient backup program",
+    "category": "Backup"
+  },
+  {
+    "name": "Portainer",
+    "url": "https://www.portainer.io",
+    "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/portainer.png",
+    "description": "Web UI for managing Docker and Kubernetes",
+    "category": "Backup"
+  }
+]
