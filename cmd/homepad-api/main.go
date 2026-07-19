@@ -42,6 +42,16 @@ func main() {
 		log.Printf("seeded App Library with %d catalog offers (was empty)", seeded)
 	}
 
+	// DEMO-ONLY (demo-seed branch): the public demo runs on the same ephemeral
+	// DB, so also self-heal the shared demo login + pre-populated board when the
+	// users table is empty. No-op the moment any user exists — so it never
+	// clobbers a live session and is inert on any deploy that has real users.
+	if seeded, err := store.SeedDemoIfNoUsers(ctx); err != nil {
+		log.Fatalf("seed demo: %v", err)
+	} else if seeded {
+		log.Println("seeded demo login + curated board (users table was empty)")
+	}
+
 	poller := gatus.NewPoller(gatus.NewClient(os.Getenv("GATUS_BASE_URL")), 30*time.Second)
 	go func() {
 		if err := poller.Run(ctx); err != nil && err != context.Canceled {
