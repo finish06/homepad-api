@@ -3,7 +3,7 @@
   <img src="https://img.shields.io/badge/Postgres-backed-336791?logo=postgresql&logoColor=white" alt="Postgres">
   <img src="https://img.shields.io/badge/auth-local%20%2B%20PocketID%20OIDC-6366f1" alt="Local + PocketID OIDC">
   <img src="https://img.shields.io/badge/tests-26%20Go%20passing-brightgreen" alt="26 Go tests passing">
-  <img src="https://img.shields.io/badge/license-homelab%20%C2%B7%20private-blue" alt="License: homelab / private">
+  <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License">
 </p>
 
 # homepad-api
