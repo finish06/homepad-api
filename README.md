@@ -13,12 +13,12 @@ badges. Serves the shared service catalog, per-user favorites & ordering, admin
 catalog CRUD, and both auth paths; polls [Gatus](https://github.com/TwiN/gatus)
 server-side so the browser never sees the Gatus URL.
 
-Web frontend (React + Vite) lives at [`homepad`](../homepad)
+Web frontend (React + Vite) lives at [`homepad`](https://github.com/finish06/homepad)
 — see its README for the banner, screenshots, and rendered architecture / auth
 diagrams.
 
-> **Spec:** [`Code/homepad/specs/v1-launcher.md`](https://gitea.kube.calebdunn.tech/Code/homepad/src/branch/main/specs/v1-launcher.md)
-> **Test plan:** [`Code/homepad/specs/test-plan-v1.md`](https://gitea.kube.calebdunn.tech/Code/homepad/src/branch/main/specs/test-plan-v1.md)
+> **Spec:** [`homepad/specs/v1-launcher.md`](https://github.com/finish06/homepad/blob/main/specs/v1-launcher.md)
+> **Test plan:** [`homepad/specs/test-plan-v1.md`](https://github.com/finish06/homepad/blob/main/specs/test-plan-v1.md)
 
 ## Status
 
