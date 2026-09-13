@@ -60,13 +60,23 @@ type Snapshot struct {
 	Statuses map[string]EndpointStatus
 }
 
+// DefaultDegradedAfter is the response-time threshold past which a SUCCESSFUL
+// check reads DEGRADED (Caleb, 2026-09-13: "succeeded but > 1000 ms"). Gatus has
+// no degraded state of its own — a failed [RESPONSE_TIME] condition just fails
+// the check — so homepad derives it from the duration Gatus reports. Overridden
+// per install via GATUS_DEGRADED_MS; 0 disables the derivation.
+const DefaultDegradedAfter = time.Second
+
 type Client struct {
 	BaseURL string
-	http    *http.Client
+	// DegradedAfter — a succeeded check slower than this is DEGRADED. Strictly
+	// greater than; 0 disables. See DefaultDegradedAfter.
+	DegradedAfter time.Duration
+	http          *http.Client
 }
 
 func NewClient(baseURL string) *Client {
-	return &Client{BaseURL: baseURL, http: &http.Client{}}
+	return &Client{BaseURL: baseURL, DegradedAfter: DefaultDegradedAfter, http: &http.Client{}}
 }
 
 // FetchAll pulls the full endpoint snapshot from Gatus. Status is derived from
@@ -101,10 +111,14 @@ func (c *Client) FetchAll(ctx context.Context) ([]EndpointStatus, error) {
 		if n := len(e.Results); n > 0 {
 			last := e.Results[n-1]
 			es.LastResultAt = last.Timestamp
-			if last.Success {
-				es.Status = StatusUp
-			} else {
+			switch {
+			case !last.Success:
 				es.Status = StatusDown
+			case c.DegradedAfter > 0 && last.Duration > 0 && time.Duration(last.Duration) > c.DegradedAfter:
+				// Answered, but slowly: the tile says "Slow", the panel goes amber.
+				es.Status = StatusDegraded
+			default:
+				es.Status = StatusUp
 			}
 			// Surface the recent history for the sparkline. Gatus returns
 			// results oldest-first (the last entry is the current check, used

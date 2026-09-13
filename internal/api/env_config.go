@@ -24,6 +24,7 @@ type envConfigEntry struct {
 // here (they carry credentials, §4). Adding a var requires a change here.
 var allowlistedEnvVars = []string{
 	"GATUS_BASE_URL",
+	"GATUS_DEGRADED_MS",
 	"COOKIE_SECURE",
 	"HOMEPAD_REGISTRATION",
 	"PORT",
