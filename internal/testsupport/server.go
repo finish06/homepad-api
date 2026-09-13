@@ -2,6 +2,8 @@ package testsupport
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"testing"
@@ -63,6 +65,49 @@ func NewOIDCServer(t *testing.T, cfg oidc.Config) (*httptest.Server, *storage.St
 // Callers must defer Close().
 func NewServer(t *testing.T) *httptest.Server {
 	t.Helper()
+	// Gatus points at a black hole, so every keyed service resolves UNKNOWN (A9).
+	return newServer(t, "http://127.0.0.1:1")
+}
+
+// GatusResult is one check in a stubbed Gatus history, oldest-first. A zero
+// DurationMs is emitted as no `duration` at all, matching an older Gatus.
+type GatusResult struct {
+	Success    bool
+	DurationMs int64
+}
+
+// NewServerWithGatus is NewServer with a LIVE Gatus stub serving the given
+// results per endpoint key, for tests that need real statuses / durations
+// (responseTimeMs, status refresh). Returns the stub's URL for reference.
+func NewServerWithGatus(t *testing.T, endpoints map[string][]GatusResult) (*httptest.Server, string) {
+	t.Helper()
+	base := time.Date(2026, 9, 13, 1, 0, 0, 0, time.UTC)
+	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/endpoints/statuses" {
+			// Uptime windows are best-effort in the poller; a 404 here is omitted.
+			http.NotFound(w, r)
+			return
+		}
+		var payload []map[string]any
+		for key, results := range endpoints {
+			var rs []map[string]any
+			for i, res := range results {
+				m := map[string]any{"success": res.Success, "timestamp": base.Add(time.Duration(i) * 30 * time.Second)}
+				if res.DurationMs > 0 {
+					m["duration"] = res.DurationMs * int64(time.Millisecond)
+				}
+				rs = append(rs, m)
+			}
+			payload = append(payload, map[string]any{"key": key, "results": rs})
+		}
+		_ = json.NewEncoder(w).Encode(payload)
+	}))
+	t.Cleanup(stub.Close)
+	return newServer(t, stub.URL), stub.URL
+}
+
+func newServer(t *testing.T, gatusURL string) *httptest.Server {
+	t.Helper()
 
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
@@ -104,7 +149,7 @@ func NewServer(t *testing.T) *httptest.Server {
 		seedService(t, ctx, store, owner, "grafana", "Grafana", "core_grafana")
 	}
 
-	poller := gatus.NewPoller(gatus.NewClient("http://127.0.0.1:1"), time.Hour)
+	poller := gatus.NewPoller(gatus.NewClient(gatusURL), time.Hour)
 
 	h := api.New(api.Deps{
 		Store:        store,

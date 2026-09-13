@@ -49,7 +49,15 @@ GET    /api/auth/config         GET  /api/auth/oidc/login        (when OIDC on)
 GET    /api/services            POST   /api/services             (admin)
 PUT    /api/layout              PATCH  /api/services/{id}         (admin)
                                 DELETE /api/services/{id}         (admin)
+GET    /api/status              POST   /api/status/refresh        (re-poll Gatus now)
 ```
+
+`GET /api/services` carries `responseTimeMs` per service — the latest Gatus
+check's response time — **only when there is one**; the key is omitted (never
+`0`) for unmonitored services or when Gatus reported no duration.
+`POST /api/status/refresh` re-polls Gatus synchronously: `200 {as_of}` when it
+answered, `503 {error, as_of}` when it could not be reached (the last good
+snapshot and its `as_of` stand).
 
 ## Layout
 

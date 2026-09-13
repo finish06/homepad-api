@@ -27,6 +27,10 @@ const (
 type CheckResult struct {
 	Success   bool
 	Timestamp time.Time
+	// Duration is the check's response time as Gatus measured it (its JSON
+	// `duration`, nanoseconds). Zero when the payload omitted it — read that
+	// as unknown, never as "0 ms" (SPEC-tile-density OQ-6).
+	Duration time.Duration
 }
 
 type EndpointStatus struct {
@@ -84,6 +88,7 @@ func (c *Client) FetchAll(ctx context.Context) ([]EndpointStatus, error) {
 		Results []struct {
 			Success   bool      `json:"success"`
 			Timestamp time.Time `json:"timestamp"`
+			Duration  int64     `json:"duration"` // nanoseconds; absent → 0
 		} `json:"results"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&endpoints); err != nil {
@@ -110,7 +115,11 @@ func (c *Client) FetchAll(ctx context.Context) ([]EndpointStatus, error) {
 			}
 			es.Results = make([]CheckResult, 0, n-start)
 			for _, r := range e.Results[start:] {
-				es.Results = append(es.Results, CheckResult{Success: r.Success, Timestamp: r.Timestamp})
+				es.Results = append(es.Results, CheckResult{
+					Success:   r.Success,
+					Timestamp: r.Timestamp,
+					Duration:  time.Duration(r.Duration),
+				})
 			}
 		}
 		out = append(out, es)
@@ -214,22 +223,54 @@ func (p *Poller) Run(ctx context.Context) error {
 }
 
 func (p *Poller) poll(ctx context.Context) {
+	// Scheduled polls keep the A9 contract: a transport error publishes an
+	// empty snapshot (every keyed service reads UNKNOWN) rather than crashing.
+	snap, _ := p.fetch(ctx)
+	p.publish(snap)
+}
+
+// fetch performs one poll and builds the snapshot it would publish. On a
+// transport error the returned snapshot is empty and err is non-nil; the
+// caller decides whether that empty snapshot replaces the last good one.
+func (p *Poller) fetch(ctx context.Context) (Snapshot, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
 	snap := Snapshot{AsOf: time.Now(), Statuses: map[string]EndpointStatus{}}
-	if statuses, err := p.client.FetchAll(ctx); err == nil {
-		// Best-effort: layer Gatus's own computed long-window uptime onto each
-		// endpoint before publishing the snapshot.
-		p.client.fillUptime(ctx, statuses)
-		for _, st := range statuses {
-			snap.Statuses[st.Key] = st
-		}
+	statuses, err := p.client.FetchAll(ctx)
+	if err != nil {
+		return snap, err
 	}
+	// Best-effort: layer Gatus's own computed long-window uptime onto each
+	// endpoint before publishing the snapshot.
+	p.client.fillUptime(ctx, statuses)
+	for _, st := range statuses {
+		snap.Statuses[st.Key] = st
+	}
+	return snap, nil
+}
 
+func (p *Poller) publish(snap Snapshot) {
 	p.mu.Lock()
 	p.snapshot = snap
 	p.mu.Unlock()
+}
+
+// PollNow re-polls Gatus synchronously on request — the primitive behind
+// POST /api/status/refresh (SPEC-v24 §12.3, OQ-5: "Retry now" prods the
+// poller instead of the client refetching the same stale payload).
+//
+// Unlike the scheduled poll, a failed manual re-poll does NOT replace the last
+// good snapshot: it returns the error and leaves AsOf where it was. That is
+// what lets the endpoint tell "could not reach Gatus" (error, old as_of) apart
+// from "re-polled, still old" (no error, new as_of, same data).
+func (p *Poller) PollNow(ctx context.Context) (Snapshot, error) {
+	snap, err := p.fetch(ctx)
+	if err != nil {
+		return p.Snapshot(), err
+	}
+	p.publish(snap)
+	return snap, nil
 }
 
 func (p *Poller) Snapshot() Snapshot {
