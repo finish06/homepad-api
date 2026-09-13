@@ -11,11 +11,11 @@ import (
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/testsupport"
 )
 
-// SPEC-app-grid §3B + A1 — category.grid_width: the box's App Grid width (1–8).
-// Persisted (§4A DECIDED = PERSIST), read on GET /api/categories, written via
-// PATCH /api/categories/{id} {gridWidth}. Owner-scoped, matching the sibling
-// rename PATCH on the same endpoint. AC-018 (survives reload), AC-020 (new box
-// defaults to width 3).
+// SPEC-app-grid §10.4 (2026-09-12, OQ-3) — category.grid_width is a 12-COLUMN
+// SPAN: 3 (quarter), 4 (third), 6 (half) or 12 (full). It replaces the 1–8
+// tile-count model (§3B + A1); migration 0013 remaps stored values and keeps
+// the old ones in grid_width_legacy. Persisted, read on GET /api/categories,
+// written via PATCH /api/categories/{id} {gridWidth}, owner-scoped.
 
 type gwCat struct {
 	ID        string `json:"id"`
@@ -39,17 +39,18 @@ func getGWCats(t *testing.T, baseURL, token string) map[string]gwCat {
 	return out
 }
 
-// AC-020 — a newly created box defaults to width 3.
-func TestCreateCategory_DefaultsGridWidth3(t *testing.T) {
+// §10.4 — a newly created box defaults to a HALF-width span (6): the same share
+// of the row the old default 3-of-6 had.
+func TestCreateCategory_DefaultsToHalfSpan(t *testing.T) {
 	s := testsupport.NewServer(t)
 	defer s.Close()
 
 	c := createCategory(t, s.URL, "admin-session", "Media")
 	got := getGWCats(t, s.URL, "admin-session")[c.ID]
-	assert.Equal(t, 3, got.GridWidth, "new category must default to gridWidth 3")
+	assert.Equal(t, 6, got.GridWidth, "new category must default to span 6 (half)")
 }
 
-// AC-018 — an admin changes a box width; it persists across a fresh read.
+// AC-018 — an admin changes a box span; it persists across a fresh read.
 func TestPatchCategoryGridWidth_Persists(t *testing.T) {
 	s := testsupport.NewServer(t)
 	defer s.Close()
@@ -57,24 +58,42 @@ func TestPatchCategoryGridWidth_Persists(t *testing.T) {
 	c := createCategory(t, s.URL, "admin-session", "Development")
 
 	resp := doJSON(t, http.MethodPatch, s.URL+"/api/categories/"+c.ID, "admin-session",
-		map[string]any{"gridWidth": 5})
+		map[string]any{"gridWidth": 4})
 	resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode, "PATCH gridWidth must return 200")
 
 	got := getGWCats(t, s.URL, "admin-session")[c.ID]
-	assert.Equal(t, 5, got.GridWidth, "gridWidth must persist across a re-read")
+	assert.Equal(t, 4, got.GridWidth, "gridWidth must persist across a re-read")
 }
 
-// §3B + Amendment A1 — gridWidth outside 1–8 is rejected (400) and nothing is
-// changed. (A1 widens the range from 1–6 to 1–8; 7 is now valid — see the accept
-// test below.)
-func TestPatchCategoryGridWidth_Rejects_OutOfRange(t *testing.T) {
+// §10.4 — every legal span is accepted and persisted (API validator AND DB CHECK).
+func TestPatchCategoryGridWidth_AcceptsEverySpan(t *testing.T) {
+	s := testsupport.NewServer(t)
+	defer s.Close()
+
+	c := createCategory(t, s.URL, "admin-session", "Wide")
+
+	for _, w := range []int{3, 4, 6, 12} {
+		resp := doJSON(t, http.MethodPatch, s.URL+"/api/categories/"+c.ID, "admin-session",
+			map[string]any{"gridWidth": w})
+		resp.Body.Close()
+		require.Equal(t, http.StatusOK, resp.StatusCode, "span %d must be accepted", w)
+
+		got := getGWCats(t, s.URL, "admin-session")[c.ID]
+		assert.Equal(t, w, got.GridWidth, "span %d must persist", w)
+	}
+}
+
+// §10.4 — anything that is not one of the four spans is rejected (400) and
+// nothing changes. That includes the OLD tile counts that have no span twin
+// (1, 2, 5, 7, 8): the API no longer speaks the 1–8 model at all.
+func TestPatchCategoryGridWidth_RejectsNonSpans(t *testing.T) {
 	s := testsupport.NewServer(t)
 	defer s.Close()
 
 	c := createCategory(t, s.URL, "admin-session", "Infra")
 
-	for _, bad := range []int{0, 9, -1} {
+	for _, bad := range []int{0, -1, 1, 2, 5, 7, 8, 9, 11, 13} {
 		resp := doJSON(t, http.MethodPatch, s.URL+"/api/categories/"+c.ID, "admin-session",
 			map[string]any{"gridWidth": bad})
 		resp.Body.Close()
@@ -82,26 +101,7 @@ func TestPatchCategoryGridWidth_Rejects_OutOfRange(t *testing.T) {
 	}
 
 	got := getGWCats(t, s.URL, "admin-session")[c.ID]
-	assert.Equal(t, 3, got.GridWidth, "a rejected width must leave the stored value unchanged")
-}
-
-// Amendment A1 — the range widens to 1–8; widths 7 and 8 must now be accepted and
-// persisted (both the API validator AND the DB CHECK must allow them).
-func TestPatchCategoryGridWidth_Accepts_7And8(t *testing.T) {
-	s := testsupport.NewServer(t)
-	defer s.Close()
-
-	c := createCategory(t, s.URL, "admin-session", "Wide")
-
-	for _, w := range []int{7, 8} {
-		resp := doJSON(t, http.MethodPatch, s.URL+"/api/categories/"+c.ID, "admin-session",
-			map[string]any{"gridWidth": w})
-		resp.Body.Close()
-		require.Equal(t, http.StatusOK, resp.StatusCode, "gridWidth %d must be accepted", w)
-
-		got := getGWCats(t, s.URL, "admin-session")[c.ID]
-		assert.Equal(t, w, got.GridWidth, "gridWidth %d must persist", w)
-	}
+	assert.Equal(t, 6, got.GridWidth, "a rejected width must leave the stored value unchanged")
 }
 
 // A gridWidth-only PATCH must not require or clobber the name, and a name-only
@@ -111,9 +111,9 @@ func TestPatchCategory_NameOnly_LeavesGridWidth(t *testing.T) {
 	defer s.Close()
 
 	c := createCategory(t, s.URL, "admin-session", "Media")
-	// set a non-default width first
+	// set a non-default span first
 	doJSON(t, http.MethodPatch, s.URL+"/api/categories/"+c.ID, "admin-session",
-		map[string]any{"gridWidth": 6}).Body.Close()
+		map[string]any{"gridWidth": 12}).Body.Close()
 
 	resp := doJSON(t, http.MethodPatch, s.URL+"/api/categories/"+c.ID, "admin-session",
 		map[string]any{"name": "Movies"})
@@ -122,5 +122,5 @@ func TestPatchCategory_NameOnly_LeavesGridWidth(t *testing.T) {
 
 	got := getGWCats(t, s.URL, "admin-session")[c.ID]
 	assert.Equal(t, "Movies", got.Name, "name-only PATCH renames")
-	assert.Equal(t, 6, got.GridWidth, "name-only PATCH must not reset gridWidth")
+	assert.Equal(t, 12, got.GridWidth, "name-only PATCH must not reset gridWidth")
 }

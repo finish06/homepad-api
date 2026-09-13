@@ -63,6 +63,11 @@ snapshot and its `as_of` stand).
 `compact`) alongside `themePref`. PATCH takes either or both fields; only the
 fields present are validated and written.
 
+`categories.gridWidth` is a **12-column span** — `3` (quarter), `4` (third), `6`
+(half) or `12` (full); default `6`. `PATCH /api/categories/{id} {gridWidth}` rejects
+anything else with 400. Migration `0013` remapped the old 1–8 tile counts
+(1→3, 2→4, 3→6, 4→6, 5→12, 6–8→12) and kept the old value in `grid_width_legacy`.
+
 ## Layout
 
 ```
