@@ -10,12 +10,24 @@ import (
 )
 
 // categoryView is the wire shape of a category (v4). sortIndex is the
-// admin-controlled order; gridWidth is the App Grid box width 1–8 (SPEC-app-grid).
+// admin-controlled order; gridWidth is the App Grid box's 12-column SPAN — 3, 4, 6
+// or 12 (SPEC-app-grid §10.4; was a 1–8 tile count before migration 0013).
 type categoryView struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
 	SortIndex int    `json:"sortIndex"`
 	GridWidth int    `json:"gridWidth"`
+}
+
+// validGridSpan — the four legal 12-column spans (quarter, third, half, full).
+// Mirrors the DB CHECK from migration 0013.
+func validGridSpan(w int) bool {
+	switch w {
+	case 3, 4, 6, 12:
+		return true
+	default:
+		return false
+	}
 }
 
 func newCategoryView(c storage.Category) categoryView {
@@ -91,7 +103,7 @@ func (s *server) handleCreateCategory(w http.ResponseWriter, r *http.Request) {
 // handleUpdateCategory updates one of the caller's OWN categories (v9, A4 — no
 // admin gate, owner-scoped: another user's id → 404, D2/A14). Two independently
 // optional fields: `name` (rename; a name collision → 409) and `gridWidth` (the
-// App Grid box width, 1–8, SPEC-app-grid §3B). A gridWidth-only PATCH must not
+// App Grid box's 12-column span: 3, 4, 6 or 12 — SPEC-app-grid §10.4). A gridWidth-only PATCH must not
 // require a name, and vice-versa; when both are present, rename then set width.
 // At least one must be present. Admin-only under the shared catalog model
 // (SPEC-245-224, #224): a non-admin session gets 403.
@@ -113,8 +125,8 @@ func (s *server) handleUpdateCategory(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "name or gridWidth is required", http.StatusBadRequest)
 		return
 	}
-	if in.GridWidth != nil && (*in.GridWidth < 1 || *in.GridWidth > 8) {
-		http.Error(w, "gridWidth must be between 1 and 8", http.StatusBadRequest)
+	if in.GridWidth != nil && !validGridSpan(*in.GridWidth) {
+		http.Error(w, "gridWidth must be one of 3, 4, 6, 12", http.StatusBadRequest)
 		return
 	}
 
