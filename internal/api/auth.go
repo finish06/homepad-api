@@ -26,13 +26,15 @@ type userView struct {
 	Email     string `json:"email"`
 	Role      string `json:"role"`
 	ThemePref string `json:"themePref"`
+	// DensityPref is the v16 tile density (large|compact|list), per user (OQ-9).
+	DensityPref string `json:"densityPref"`
 	// Name is the user's display name (v7 §6.2); empty when unset, in which
 	// case the frontend derives the avatar from the email's first letter.
 	Name string `json:"name"`
 }
 
 func newUserView(u storage.User) userView {
-	return userView{ID: u.ID, Email: u.Email, Role: u.Role, ThemePref: u.ThemePref, Name: u.DisplayName}
+	return userView{ID: u.ID, Email: u.Email, Role: u.Role, ThemePref: u.ThemePref, DensityPref: u.DensityPref, Name: u.DisplayName}
 }
 
 func (s *server) handleRegister(w http.ResponseWriter, r *http.Request) {
@@ -131,10 +133,12 @@ func (s *server) handleMe(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, newUserView(u))
 }
 
-// handlePatchMe updates the current user's own account fields. For v3 the only
-// field is themePref (system|light|dark). Session-gated: 401 if not logged in.
-// An unknown themePref value → 400, leaving the stored value unchanged. It
-// writes only the current user's row — there is no path to another user's.
+// handlePatchMe updates the current user's own account fields: themePref (v3,
+// system|light|dark) and densityPref (v16, large|compact|list). PATCH semantics
+// — only the fields present in the body are validated and written; a body with
+// neither is a 400. Session-gated: 401 if not logged in. An unknown value → 400,
+// leaving the stored value unchanged. It writes only the current user's row —
+// there is no path to another user's.
 func (s *server) handlePatchMe(w http.ResponseWriter, r *http.Request) {
 	u, ok := s.currentUser(r)
 	if !ok {
@@ -143,23 +147,47 @@ func (s *server) handlePatchMe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
-		ThemePref string `json:"themePref"`
+		ThemePref   *string `json:"themePref"`
+		DensityPref *string `json:"densityPref"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid JSON body", http.StatusBadRequest)
 		return
 	}
-	if !validThemePref(body.ThemePref) {
+	if body.ThemePref == nil && body.DensityPref == nil {
+		http.Error(w, "body must include themePref or densityPref", http.StatusBadRequest)
+		return
+	}
+	// Validate everything before writing anything, so a bad field cannot
+	// half-apply a request.
+	if body.ThemePref != nil && !validThemePref(*body.ThemePref) {
 		http.Error(w, "themePref must be one of system, light, dark", http.StatusBadRequest)
 		return
 	}
-
-	if err := s.store.SetThemePref(r.Context(), u.ID, body.ThemePref); err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+	if body.DensityPref != nil && !validDensityPref(*body.DensityPref) {
+		http.Error(w, "densityPref must be one of large, compact, list", http.StatusBadRequest)
 		return
 	}
-	u.ThemePref = body.ThemePref
+
+	if body.ThemePref != nil {
+		if err := s.store.SetThemePref(r.Context(), u.ID, *body.ThemePref); err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		u.ThemePref = *body.ThemePref
+	}
+	if body.DensityPref != nil {
+		if err := s.store.SetDensityPref(r.Context(), u.ID, *body.DensityPref); err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		u.DensityPref = *body.DensityPref
+	}
 	writeJSON(w, http.StatusOK, newUserView(u))
+}
+
+func validDensityPref(v string) bool {
+	return v == "large" || v == "compact" || v == "list"
 }
 
 func validThemePref(v string) bool {
