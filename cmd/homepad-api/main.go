@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -42,7 +43,17 @@ func main() {
 		log.Printf("seeded App Library with %d catalog offers (was empty)", seeded)
 	}
 
-	poller := gatus.NewPoller(gatus.NewClient(os.Getenv("GATUS_BASE_URL")), 30*time.Second)
+	gatusClient := gatus.NewClient(os.Getenv("GATUS_BASE_URL"))
+	// GATUS_DEGRADED_MS — a succeeded check slower than this reads DEGRADED
+	// ("Slow" on the tile). Unset → 1000; 0 disables; junk is logged and ignored.
+	if v := os.Getenv("GATUS_DEGRADED_MS"); v != "" {
+		if ms, err := strconv.Atoi(v); err == nil && ms >= 0 {
+			gatusClient.DegradedAfter = time.Duration(ms) * time.Millisecond
+		} else {
+			log.Printf("GATUS_DEGRADED_MS=%q is not a non-negative integer; using %s", v, gatus.DefaultDegradedAfter)
+		}
+	}
+	poller := gatus.NewPoller(gatusClient, 30*time.Second)
 	go func() {
 		if err := poller.Run(ctx); err != nil && err != context.Canceled {
 			log.Printf("poller stopped: %v", err)
