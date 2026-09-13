@@ -28,6 +28,7 @@ type envConfigEntry struct {
 // the complete allowlist the endpoint must return, in order (AC-003).
 var wantEnvConfigKeys = []string{
 	"GATUS_BASE_URL",
+	"GATUS_DEGRADED_MS",
 	"COOKIE_SECURE",
 	"HOMEPAD_REGISTRATION",
 	"PORT",

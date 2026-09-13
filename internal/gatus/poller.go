@@ -60,13 +60,40 @@ type Snapshot struct {
 	Statuses map[string]EndpointStatus
 }
 
+// DefaultDegradedAfter is the response-time threshold past which a SUCCESSFUL
+// check reads DEGRADED (Caleb, 2026-09-13: "succeeded but > 1000 ms"). Gatus has
+// no degraded state of its own — a failed [RESPONSE_TIME] condition just fails
+// the check — so homepad derives it from the duration Gatus reports. Overridden
+// per install via GATUS_DEGRADED_MS; 0 disables the derivation.
+const DefaultDegradedAfter = time.Second
+
 type Client struct {
 	BaseURL string
-	http    *http.Client
+	// DegradedAfter — a succeeded check slower than this is DEGRADED. Strictly
+	// greater than; 0 disables. See DefaultDegradedAfter. Guarded by mu because
+	// the admin System panel changes it at runtime while the poller is running:
+	// read via degradedAfter(), write via SetDegradedAfter.
+	DegradedAfter time.Duration
+	mu            sync.RWMutex
+	http          *http.Client
 }
 
 func NewClient(baseURL string) *Client {
-	return &Client{BaseURL: baseURL, http: &http.Client{}}
+	return &Client{BaseURL: baseURL, DegradedAfter: DefaultDegradedAfter, http: &http.Client{}}
+}
+
+// SetDegradedAfter changes the "Slow" threshold for every poll from now on
+// (runtime System setting). 0 disables the derivation.
+func (c *Client) SetDegradedAfter(d time.Duration) {
+	c.mu.Lock()
+	c.DegradedAfter = d
+	c.mu.Unlock()
+}
+
+func (c *Client) degradedAfter() time.Duration {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.DegradedAfter
 }
 
 // FetchAll pulls the full endpoint snapshot from Gatus. Status is derived from
@@ -101,10 +128,14 @@ func (c *Client) FetchAll(ctx context.Context) ([]EndpointStatus, error) {
 		if n := len(e.Results); n > 0 {
 			last := e.Results[n-1]
 			es.LastResultAt = last.Timestamp
-			if last.Success {
-				es.Status = StatusUp
-			} else {
+			switch {
+			case !last.Success:
 				es.Status = StatusDown
+			case c.degradedAfter() > 0 && last.Duration > 0 && time.Duration(last.Duration) > c.degradedAfter():
+				// Answered, but slowly: the tile says "Slow", the panel goes amber.
+				es.Status = StatusDegraded
+			default:
+				es.Status = StatusUp
 			}
 			// Surface the recent history for the sparkline. Gatus returns
 			// results oldest-first (the last entry is the current check, used
@@ -204,6 +235,12 @@ func NewPoller(client *Client, interval time.Duration) *Poller {
 }
 
 func (p *Poller) Interval() time.Duration { return p.interval }
+
+// SetDegradedAfter forwards the runtime "Slow" threshold to the client.
+func (p *Poller) SetDegradedAfter(d time.Duration) { p.client.SetDegradedAfter(d) }
+
+// DegradedAfter reports the threshold currently in force.
+func (p *Poller) DegradedAfter() time.Duration { return p.client.degradedAfter() }
 
 // Run polls Gatus immediately, then on each interval tick, until ctx is done.
 // Transport errors are swallowed (A9): a failed poll leaves the published
