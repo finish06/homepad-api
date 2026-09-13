@@ -70,13 +70,30 @@ const DefaultDegradedAfter = time.Second
 type Client struct {
 	BaseURL string
 	// DegradedAfter — a succeeded check slower than this is DEGRADED. Strictly
-	// greater than; 0 disables. See DefaultDegradedAfter.
+	// greater than; 0 disables. See DefaultDegradedAfter. Guarded by mu because
+	// the admin System panel changes it at runtime while the poller is running:
+	// read via degradedAfter(), write via SetDegradedAfter.
 	DegradedAfter time.Duration
+	mu            sync.RWMutex
 	http          *http.Client
 }
 
 func NewClient(baseURL string) *Client {
 	return &Client{BaseURL: baseURL, DegradedAfter: DefaultDegradedAfter, http: &http.Client{}}
+}
+
+// SetDegradedAfter changes the "Slow" threshold for every poll from now on
+// (runtime System setting). 0 disables the derivation.
+func (c *Client) SetDegradedAfter(d time.Duration) {
+	c.mu.Lock()
+	c.DegradedAfter = d
+	c.mu.Unlock()
+}
+
+func (c *Client) degradedAfter() time.Duration {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.DegradedAfter
 }
 
 // FetchAll pulls the full endpoint snapshot from Gatus. Status is derived from
@@ -114,7 +131,7 @@ func (c *Client) FetchAll(ctx context.Context) ([]EndpointStatus, error) {
 			switch {
 			case !last.Success:
 				es.Status = StatusDown
-			case c.DegradedAfter > 0 && last.Duration > 0 && time.Duration(last.Duration) > c.DegradedAfter:
+			case c.degradedAfter() > 0 && last.Duration > 0 && time.Duration(last.Duration) > c.degradedAfter():
 				// Answered, but slowly: the tile says "Slow", the panel goes amber.
 				es.Status = StatusDegraded
 			default:
@@ -218,6 +235,12 @@ func NewPoller(client *Client, interval time.Duration) *Poller {
 }
 
 func (p *Poller) Interval() time.Duration { return p.interval }
+
+// SetDegradedAfter forwards the runtime "Slow" threshold to the client.
+func (p *Poller) SetDegradedAfter(d time.Duration) { p.client.SetDegradedAfter(d) }
+
+// DegradedAfter reports the threshold currently in force.
+func (p *Poller) DegradedAfter() time.Duration { return p.client.degradedAfter() }
 
 // Run polls Gatus immediately, then on each interval tick, until ctx is done.
 // Transport errors are swallowed (A9): a failed poll leaves the published

@@ -58,6 +58,10 @@ check's response time — **only when there is one**; the key is omitted (never
 A service whose latest check **succeeded but took longer than `GATUS_DEGRADED_MS`**
 (default `1000`; `0` disables) reads `DEGRADED` — "Slow" on the tile. Gatus has
 no degraded state of its own; homepad derives it from the reported duration.
+Admins can change the threshold at runtime from the System panel: it is
+`statusDegradedMs` on `GET /api/system/config` (the effective value) and
+`PATCH /api/admin/settings` (migration `0014`); a saved value wins over the env
+var and applies to the next poll with no restart.
 `POST /api/status/refresh` re-polls Gatus synchronously: `200 {as_of}` when it
 answered, `503 {error, as_of}` when it could not be reached (the last good
 snapshot and its `as_of` stand).

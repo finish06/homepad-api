@@ -53,6 +53,10 @@ func main() {
 			log.Printf("GATUS_DEGRADED_MS=%q is not a non-negative integer; using %s", v, gatus.DefaultDegradedAfter)
 		}
 	}
+	// A threshold saved from the admin System panel wins over the env default.
+	if cfg, err := store.SystemSettings(ctx); err == nil && cfg.StatusDegradedMs != nil {
+		gatusClient.SetDegradedAfter(time.Duration(*cfg.StatusDegradedMs) * time.Millisecond)
+	}
 	poller := gatus.NewPoller(gatusClient, 30*time.Second)
 	go func() {
 		if err := poller.Run(ctx); err != nil && err != context.Canceled {

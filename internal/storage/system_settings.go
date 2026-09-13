@@ -14,6 +14,9 @@ import (
 // needs no seed data to preserve existing behavior (SPEC cap6 §6, D7).
 type SystemSettings struct {
 	ShowUptimeDisplay bool
+	// StatusDegradedMs is the admin-set "Slow" threshold (migration 0014); nil
+	// means "not set in the UI" — the server default / GATUS_DEGRADED_MS applies.
+	StatusDegradedMs *int
 }
 
 // defaultSystemSettings is the safe-from-absent config: everything ON. Returned
@@ -28,8 +31,8 @@ func defaultSystemSettings() SystemSettings {
 func (s *Store) SystemSettings(ctx context.Context) (SystemSettings, error) {
 	cfg := defaultSystemSettings()
 	err := s.pool.QueryRow(ctx,
-		`SELECT show_uptime_display FROM system_settings WHERE id = 1`).
-		Scan(&cfg.ShowUptimeDisplay)
+		`SELECT show_uptime_display, status_degraded_ms FROM system_settings WHERE id = 1`).
+		Scan(&cfg.ShowUptimeDisplay, &cfg.StatusDegradedMs)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return defaultSystemSettings(), nil
 	}
@@ -46,13 +49,14 @@ func (s *Store) SystemSettings(ctx context.Context) (SystemSettings, error) {
 func (s *Store) UpsertSystemSettings(ctx context.Context, in SystemSettings) (SystemSettings, error) {
 	var out SystemSettings
 	err := s.pool.QueryRow(ctx,
-		`INSERT INTO system_settings (id, show_uptime_display, updated_at)
-		 VALUES (1, $1, now())
+		`INSERT INTO system_settings (id, show_uptime_display, status_degraded_ms, updated_at)
+		 VALUES (1, $1, $2, now())
 		 ON CONFLICT (id) DO UPDATE
 		   SET show_uptime_display = EXCLUDED.show_uptime_display,
+		       status_degraded_ms = EXCLUDED.status_degraded_ms,
 		       updated_at = now()
-		 RETURNING show_uptime_display`, in.ShowUptimeDisplay).
-		Scan(&out.ShowUptimeDisplay)
+		 RETURNING show_uptime_display, status_degraded_ms`, in.ShowUptimeDisplay, in.StatusDegradedMs).
+		Scan(&out.ShowUptimeDisplay, &out.StatusDegradedMs)
 	if err != nil {
 		return SystemSettings{}, err
 	}
