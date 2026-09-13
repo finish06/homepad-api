@@ -59,6 +59,10 @@ check's response time — **only when there is one**; the key is omitted (never
 answered, `503 {error, as_of}` when it could not be reached (the last good
 snapshot and its `as_of` stand).
 
+`GET /api/me` / `PATCH /api/me` carry `densityPref` (`large|compact|list`, default
+`compact`) alongside `themePref`. PATCH takes either or both fields; only the
+fields present are validated and written.
+
 ## Layout
 
 ```
