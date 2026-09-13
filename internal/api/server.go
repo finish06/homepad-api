@@ -84,6 +84,8 @@ func New(d Deps) http.Handler {
 		mux.HandleFunc("POST /api/library/{id}/add", s.handleAddFromLibrary)
 		mux.HandleFunc("PUT /api/layout", s.handleUpdateLayout)
 		mux.HandleFunc("GET /api/status", s.handleStatus)
+		// SPEC-v24 §12.3 — on-demand re-poll behind the health panel's "Retry now".
+		mux.HandleFunc("POST /api/status/refresh", s.handleStatusRefresh)
 		mux.HandleFunc("GET /health", s.handleHealth)
 
 		// System settings (cap6). The config read is public — registered

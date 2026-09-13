@@ -44,6 +44,12 @@ type serviceView struct {
 	// ("24h"/"7d"/"30d"), fraction 0..1. Always present; {} when unmonitored or
 	// no data. A window Gatus couldn't answer is omitted. Additive.
 	UptimeWindows map[string]float64 `json:"uptimeWindows"`
+	// ResponseTimeMs (SPEC-tile-density OQ-6) is the most recent check's
+	// response time in whole ms, backing the compact tile's status line
+	// ("Online · 41 ms"). OMITTED — not 0 — when the service is unmonitored,
+	// has no cached result, or the latest result carried no duration, so the
+	// frontend's "state word alone" degradation holds and no number is invented.
+	ResponseTimeMs *int64 `json:"responseTimeMs,omitempty"`
 }
 
 // validClickAction reports whether v is one of the three v23 click-action enum
@@ -122,6 +128,7 @@ func (s *server) handleListServices(w http.ResponseWriter, r *http.Request) {
 			GatusKey:        sv.GatusKey,
 			UptimeChecks:    uptimeChecksFor(snap, sv.GatusKey),
 			UptimeWindows:   uptimeWindowsFor(snap, sv.GatusKey),
+			ResponseTimeMs:  responseTimeMsFor(snap, sv.GatusKey),
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"services": out})
@@ -325,6 +332,33 @@ func (s *server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"as_of": snap.AsOf, "statuses": statuses})
 }
 
+// handleStatusRefresh re-polls Gatus on demand (SPEC-v24 §12.3, OQ-5) so a
+// STALE health panel can ask for fresh evidence. The two outcomes the panel
+// must tell apart:
+//   - 200 {as_of}: Gatus answered and the snapshot was replaced. as_of is new;
+//     whether the DATA changed is for the client to judge from its next fetch.
+//   - 503 {error, as_of}: Gatus could not be reached. The last good snapshot —
+//     and its as_of — still stand, so the client can say "could not reach the
+//     status source" rather than pretending the retry did anything.
+//
+// Session-gated like GET /api/status; not admin-only, because any viewer can
+// see the stale panel and the action is read-only against Gatus.
+func (s *server) handleStatusRefresh(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.currentUser(r); !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	snap, err := s.poller.PollNow(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"error": "status source unreachable",
+			"as_of": snap.AsOf,
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"as_of": snap.AsOf})
+}
+
 // statusFor resolves a service's badge from the snapshot. An empty gatus_key
 // means monitoring was never wired → NOT_MONITORED. A key that IS set but has no
 // cached result (e.g. Gatus unreachable) is a monitoring failure → UNKNOWN.
@@ -354,6 +388,24 @@ func uptimeChecksFor(snap gatus.Snapshot, gatusKey string) []checkResultView {
 		out = append(out, checkResultView{Success: r.Success, Timestamp: r.Timestamp})
 	}
 	return out
+}
+
+// responseTimeMsFor returns the latest cached check's duration in ms, or nil
+// when there is nothing honest to report (see serviceView.ResponseTimeMs).
+func responseTimeMsFor(snap gatus.Snapshot, gatusKey string) *int64 {
+	if gatusKey == "" {
+		return nil
+	}
+	st, ok := snap.Statuses[gatusKey]
+	if !ok || len(st.Results) == 0 {
+		return nil
+	}
+	last := st.Results[len(st.Results)-1]
+	if last.Duration <= 0 {
+		return nil
+	}
+	ms := last.Duration.Milliseconds()
+	return &ms
 }
 
 // uptimeWindowsFor surfaces Gatus's computed long-window uptime for a service's
