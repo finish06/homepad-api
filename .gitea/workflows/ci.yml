@@ -14,14 +14,16 @@ jobs:
         env:
           POSTGRES_USER: homepad
           POSTGRES_PASSWORD: homepad
-          POSTGRES_DB: homepad
+          # Throwaway test DB; name must end in _test to satisfy the testsupport
+          # guard, which truncates every table and refuses non-test databases.
+          POSTGRES_DB: homepad_test
         options: >-
-          --health-cmd "pg_isready -U homepad -d homepad"
+          --health-cmd "pg_isready -U homepad -d homepad_test"
           --health-interval 5s
           --health-timeout 3s
           --health-retries 10
     env:
-      DATABASE_URL: postgres://homepad:homepad@postgres:5432/homepad?sslmode=disable
+      DATABASE_URL: postgres://homepad:homepad@postgres:5432/homepad_test?sslmode=disable
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5

@@ -4,13 +4,16 @@ services:
     environment:
       POSTGRES_USER: homepad
       POSTGRES_PASSWORD: homepad
-      POSTGRES_DB: homepad
+      # A throwaway test database. The name MUST satisfy the testsupport guard
+      # (ends in _test) — the harness truncates every table on setup and refuses
+      # to run against a non-test database (see internal/testsupport/server.go).
+      POSTGRES_DB: homepad_test
     ports:
       - "5432:5432"
     volumes:
       - homepad_pg:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U homepad -d homepad"]
+      test: ["CMD-SHELL", "pg_isready -U homepad -d homepad_test"]
       interval: 2s
       timeout: 2s
       retries: 10
@@ -22,7 +25,7 @@ services:
         condition: service_healthy
     env_file: .env
     environment:
-      DATABASE_URL: postgres://homepad:homepad@postgres:5432/homepad?sslmode=disable
+      DATABASE_URL: postgres://homepad:homepad@postgres:5432/homepad_test?sslmode=disable
     ports:
       - "8080:8080"
 

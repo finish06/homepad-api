@@ -28,6 +28,13 @@ func TestCheckTestDatabase(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			// AC5 accept — the exact DSN used by CI/docker-compose (host
+			// "postgres", db homepad_test) must be allowed so the suite still runs.
+			name:    "CI/compose homepad_test DSN is accepted",
+			dsn:     "postgres://homepad:homepad@postgres:5432/homepad_test?sslmode=disable",
+			wantErr: false,
+		},
+		{
 			// AC3 — the prod host is refused even when the db is named homepad_test.
 			name:    "prod host with homepad_test name still refused",
 			dsn:     "postgres://homepad:homepad@homepad-pg-rw.homepad.svc.cluster.local:5432/homepad_test",
