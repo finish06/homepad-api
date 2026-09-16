@@ -32,13 +32,16 @@ type userView struct {
 	// distribution bar (SPEC-health-bar-visibility-toggle). Not a pointer —
 	// the column is NOT NULL, so it always has a value to report.
 	ShowHealthBar bool `json:"showHealthBar"`
+	// ShowUptimeDisplay is the per-user visibility of the per-tile uptime
+	// sparkline (cap6 v2). Not a pointer — the column is NOT NULL.
+	ShowUptimeDisplay bool `json:"showUptimeDisplay"`
 	// Name is the user's display name (v7 §6.2); empty when unset, in which
 	// case the frontend derives the avatar from the email's first letter.
 	Name string `json:"name"`
 }
 
 func newUserView(u storage.User) userView {
-	return userView{ID: u.ID, Email: u.Email, Role: u.Role, ThemePref: u.ThemePref, DensityPref: u.DensityPref, ShowHealthBar: u.ShowHealthBar, Name: u.DisplayName}
+	return userView{ID: u.ID, Email: u.Email, Role: u.Role, ThemePref: u.ThemePref, DensityPref: u.DensityPref, ShowHealthBar: u.ShowHealthBar, ShowUptimeDisplay: u.ShowUptimeDisplay, Name: u.DisplayName}
 }
 
 func (s *server) handleRegister(w http.ResponseWriter, r *http.Request) {
@@ -152,16 +155,18 @@ func (s *server) handlePatchMe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
-		ThemePref     *string `json:"themePref"`
-		DensityPref   *string `json:"densityPref"`
-		ShowHealthBar *bool   `json:"showHealthBar"`
+		ThemePref         *string `json:"themePref"`
+		DensityPref       *string `json:"densityPref"`
+		ShowHealthBar     *bool   `json:"showHealthBar"`
+		ShowUptimeDisplay *bool   `json:"showUptimeDisplay"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid JSON body", http.StatusBadRequest)
 		return
 	}
-	if body.ThemePref == nil && body.DensityPref == nil && body.ShowHealthBar == nil {
-		http.Error(w, "body must include themePref, densityPref or showHealthBar", http.StatusBadRequest)
+	if body.ThemePref == nil && body.DensityPref == nil && body.ShowHealthBar == nil &&
+		body.ShowUptimeDisplay == nil {
+		http.Error(w, "body must include themePref, densityPref, showHealthBar or showUptimeDisplay", http.StatusBadRequest)
 		return
 	}
 	// Validate everything before writing anything, so a bad field cannot
@@ -197,6 +202,15 @@ func (s *server) handlePatchMe(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		u.ShowHealthBar = *body.ShowHealthBar
+	}
+	// Like showHealthBar, no value check beyond the type: a non-boolean fails
+	// json.Decode above and 400s before anything is written.
+	if body.ShowUptimeDisplay != nil {
+		if err := s.store.SetShowUptimeDisplay(r.Context(), u.ID, *body.ShowUptimeDisplay); err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		u.ShowUptimeDisplay = *body.ShowUptimeDisplay
 	}
 	writeJSON(w, http.StatusOK, newUserView(u))
 }
