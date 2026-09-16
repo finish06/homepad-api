@@ -28,13 +28,17 @@ type userView struct {
 	ThemePref string `json:"themePref"`
 	// DensityPref is the v16 tile density (large|compact|list), per user (OQ-9).
 	DensityPref string `json:"densityPref"`
+	// ShowHealthBar is the per-user visibility of the health panel's
+	// distribution bar (SPEC-health-bar-visibility-toggle). Not a pointer —
+	// the column is NOT NULL, so it always has a value to report.
+	ShowHealthBar bool `json:"showHealthBar"`
 	// Name is the user's display name (v7 §6.2); empty when unset, in which
 	// case the frontend derives the avatar from the email's first letter.
 	Name string `json:"name"`
 }
 
 func newUserView(u storage.User) userView {
-	return userView{ID: u.ID, Email: u.Email, Role: u.Role, ThemePref: u.ThemePref, DensityPref: u.DensityPref, Name: u.DisplayName}
+	return userView{ID: u.ID, Email: u.Email, Role: u.Role, ThemePref: u.ThemePref, DensityPref: u.DensityPref, ShowHealthBar: u.ShowHealthBar, Name: u.DisplayName}
 }
 
 func (s *server) handleRegister(w http.ResponseWriter, r *http.Request) {
@@ -134,7 +138,8 @@ func (s *server) handleMe(w http.ResponseWriter, r *http.Request) {
 }
 
 // handlePatchMe updates the current user's own account fields: themePref (v3,
-// system|light|dark) and densityPref (v16, large|compact|list). PATCH semantics
+// system|light|dark), densityPref (v16, large|compact|list) and showHealthBar
+// (SPEC-health-bar-visibility-toggle, boolean). PATCH semantics
 // — only the fields present in the body are validated and written; a body with
 // neither is a 400. Session-gated: 401 if not logged in. An unknown value → 400,
 // leaving the stored value unchanged. It writes only the current user's row —
@@ -147,15 +152,16 @@ func (s *server) handlePatchMe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
-		ThemePref   *string `json:"themePref"`
-		DensityPref *string `json:"densityPref"`
+		ThemePref     *string `json:"themePref"`
+		DensityPref   *string `json:"densityPref"`
+		ShowHealthBar *bool   `json:"showHealthBar"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid JSON body", http.StatusBadRequest)
 		return
 	}
-	if body.ThemePref == nil && body.DensityPref == nil {
-		http.Error(w, "body must include themePref or densityPref", http.StatusBadRequest)
+	if body.ThemePref == nil && body.DensityPref == nil && body.ShowHealthBar == nil {
+		http.Error(w, "body must include themePref, densityPref or showHealthBar", http.StatusBadRequest)
 		return
 	}
 	// Validate everything before writing anything, so a bad field cannot
@@ -182,6 +188,15 @@ func (s *server) handlePatchMe(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		u.DensityPref = *body.DensityPref
+	}
+	// showHealthBar needs no value check: a non-boolean fails json.Decode above
+	// and 400s before anything is written, so the stored value is left alone.
+	if body.ShowHealthBar != nil {
+		if err := s.store.SetShowHealthBar(r.Context(), u.ID, *body.ShowHealthBar); err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		u.ShowHealthBar = *body.ShowHealthBar
 	}
 	writeJSON(w, http.StatusOK, newUserView(u))
 }
