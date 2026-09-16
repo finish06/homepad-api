@@ -63,6 +63,10 @@ type User struct {
 	// DensityPref is the v16 tile density (large|compact|list), per user
 	// (decision record 2026-09-12, OQ-9). DB default 'compact'.
 	DensityPref string
+	// ShowHealthBar is the per-user visibility of the health panel's
+	// distribution bar (SPEC-health-bar-visibility-toggle). Column is
+	// NOT NULL DEFAULT TRUE, so an existing user reads back true.
+	ShowHealthBar bool
 	// DisplayName is the optional human name (v7). The column is nullable; it
 	// is scanned via COALESCE so an unset name reads as "" (the frontend then
 	// falls back to the email's first letter for the avatar).
@@ -174,9 +178,9 @@ func (s *Store) CreateUser(ctx context.Context, email, passwordHash, role string
 	var u User
 	err := s.pool.QueryRow(ctx,
 		`INSERT INTO users (email, password_hash, role) VALUES ($1, $2, $3)
-		 RETURNING id, email, password_hash, role, theme_pref, density_pref, COALESCE(display_name, '')`,
+		 RETURNING id, email, password_hash, role, theme_pref, density_pref, show_health_bar, COALESCE(display_name, '')`,
 		email, passwordHash, role,
-	).Scan(&u.ID, &u.Email, &u.PasswordHash, &u.Role, &u.ThemePref, &u.DensityPref, &u.DisplayName)
+	).Scan(&u.ID, &u.Email, &u.PasswordHash, &u.Role, &u.ThemePref, &u.DensityPref, &u.ShowHealthBar, &u.DisplayName)
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 		return User{}, ErrEmailTaken
@@ -216,6 +220,21 @@ func (s *Store) SetThemePref(ctx context.Context, userID, pref string) error {
 func (s *Store) SetDensityPref(ctx context.Context, userID, pref string) error {
 	tag, err := s.pool.Exec(ctx,
 		`UPDATE users SET density_pref = $2 WHERE id = $1`, userID, pref)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SetShowHealthBar updates a single user's health-bar visibility
+// (SPEC-health-bar-visibility-toggle AC-006/AC-008). Scoped to one row by id —
+// the handler supplies the session's user, so a user can only write their own.
+func (s *Store) SetShowHealthBar(ctx context.Context, userID string, show bool) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE users SET show_health_bar = $2 WHERE id = $1`, userID, show)
 	if err != nil {
 		return err
 	}
@@ -642,8 +661,8 @@ func (s *Store) SetLayout(ctx context.Context, userID string, orderedIDs []strin
 func (s *Store) userBy(ctx context.Context, where string, arg any) (User, error) {
 	var u User
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, email, password_hash, role, theme_pref, density_pref, COALESCE(display_name, '') FROM users `+where, arg,
-	).Scan(&u.ID, &u.Email, &u.PasswordHash, &u.Role, &u.ThemePref, &u.DensityPref, &u.DisplayName)
+		`SELECT id, email, password_hash, role, theme_pref, density_pref, show_health_bar, COALESCE(display_name, '') FROM users `+where, arg,
+	).Scan(&u.ID, &u.Email, &u.PasswordHash, &u.Role, &u.ThemePref, &u.DensityPref, &u.ShowHealthBar, &u.DisplayName)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, ErrNotFound
 	}
