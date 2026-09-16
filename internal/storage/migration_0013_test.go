@@ -44,7 +44,9 @@ func TestMigration0013_RemapsAndIsIdempotent(t *testing.T) {
 
 	var userID string
 	require.NoError(t, conn.QueryRow(ctx,
-		`INSERT INTO users (email, password_hash, role) VALUES ('m13@example.com','x','admin') RETURNING id`).Scan(&userID))
+		// 0016 dropped the column default, so a valid users row must now supply
+		// show_uptime_display explicitly. Value is irrelevant to this test.
+		`INSERT INTO users (email, password_hash, role, show_uptime_display) VALUES ('m13@example.com','x','admin',TRUE) RETURNING id`).Scan(&userID))
 	want := map[int]int{1: 3, 2: 4, 3: 6, 4: 6, 5: 12, 6: 12, 7: 12, 8: 12}
 	for old := range want {
 		_, err := conn.Exec(ctx,
