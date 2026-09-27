@@ -72,8 +72,24 @@ func (s *Store) SeedDemoIfNoUsers(ctx context.Context) (bool, error) {
 
 	var uid string
 	if err := tx.QueryRow(ctx,
-		`INSERT INTO users (email, password_hash, role, display_name)
-		 VALUES ('homepad@gethomepad.dev', $1, 'admin', 'homepad') RETURNING id`,
+		// show_uptime_display MUST be supplied explicitly. Migration 0016 adds it
+		// NOT NULL and then DROPs its DEFAULT, so an INSERT that omits it is a
+		// not-null violation — and SeedDemoIfNoUsers is log.Fatalf on error, so
+		// that would kill the container on boot. The demo's Postgres is an
+		// ephemeral sidecar wiped on every scale-to-zero, so it would be EVERY
+		// boot: the demo would be permanently down, not intermittently.
+		//
+		// This went unnoticed because 0016's own comment reasoned that
+		// "CreateUser always supplies it" — true of the app path (storage.go:185)
+		// and false of this seeder, which predates the column by two months and
+		// is the one INSERT INTO users that is not CreateUser.
+		//
+		// COALESCE mirrors CreateUser exactly rather than hardcoding TRUE, so the
+		// admin default stays the single source of truth for new accounts.
+		`INSERT INTO users (email, password_hash, role, display_name, show_uptime_display)
+		 VALUES ('homepad@gethomepad.dev', $1, 'admin', 'homepad',
+		         COALESCE((SELECT show_uptime_display FROM system_settings WHERE id = 1), TRUE))
+		 RETURNING id`,
 		string(hash)).Scan(&uid); err != nil {
 		return false, fmt.Errorf("storage.SeedDemoIfNoUsers: user: %w", err)
 	}
