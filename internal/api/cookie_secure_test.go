@@ -12,6 +12,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/api"
+	"gitea.kube.calebdunn.tech/code/homepad-api/internal/dbguard"
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/session"
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/storage"
 )
@@ -21,10 +22,7 @@ import (
 // "false" -> Secure absent (for the plain-HTTP nip.io staging setup). HttpOnly
 // and SameSite=Lax must stay set either way. Both login and logout are checked.
 func TestSessionCookieSecure(t *testing.T) {
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		t.Skip("DATABASE_URL not set — skipping integration test (needs Postgres)")
-	}
+	dsn := dbguard.RequireTestDatabase(t)
 
 	ctx := context.Background()
 	store, err := storage.Open(ctx, dsn)
