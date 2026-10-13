@@ -3,12 +3,8 @@ package testsupport
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
-	"os"
-	"strings"
 	"testing"
 	"time"
 
@@ -16,6 +12,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/api"
+	"gitea.kube.calebdunn.tech/code/homepad-api/internal/dbguard"
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/gatus"
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/oidc"
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/session"
@@ -30,12 +27,8 @@ import (
 func NewOIDCServer(t *testing.T, cfg oidc.Config) (*httptest.Server, *storage.Store) {
 	t.Helper()
 
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		t.Skip("DATABASE_URL not set — skipping integration test (needs Postgres)")
-	}
 	// AC1 — guard BEFORE anything destructive (Migrate + TRUNCATE below).
-	guardDestructive(t, dsn)
+	dsn := dbguard.RequireTestDatabase(t)
 
 	ctx := context.Background()
 	store, err := storage.Open(ctx, dsn)
@@ -114,12 +107,8 @@ func NewServerWithGatus(t *testing.T, endpoints map[string][]GatusResult) (*http
 func newServer(t *testing.T, gatusURL string) *httptest.Server {
 	t.Helper()
 
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		t.Skip("DATABASE_URL not set — skipping integration test (needs Postgres)")
-	}
 	// AC1 — guard BEFORE anything destructive (Migrate + TRUNCATE below).
-	guardDestructive(t, dsn)
+	dsn := dbguard.RequireTestDatabase(t)
 
 	ctx := context.Background()
 	store, err := storage.Open(ctx, dsn)
@@ -172,45 +161,13 @@ func newServer(t *testing.T, gatusURL string) *httptest.Server {
 // guardDestructive fails the test immediately unless dsn points at a throwaway
 // test database. It uses t.Fatalf, never t.Skip (AC2): a silent skip would let a
 // broken QA run look green, which is exactly how the prod truncation went
-// unnoticed until the data was already gone.
+// unnoticed until the data was already gone. The guard logic itself lives in
+// internal/dbguard so testsupport, storage and api share one copy (#72).
 func guardDestructive(t *testing.T, dsn string) {
 	t.Helper()
-	if err := checkTestDatabase(dsn); err != nil {
+	if err := dbguard.CheckTestDatabase(dsn); err != nil {
 		t.Fatalf("%v", err)
 	}
-}
-
-// checkTestDatabase is the single safety guard protecting every destructive
-// operation in this package (Migrate and TRUNCATE). It returns a non-nil error
-// unless DATABASE_URL points at a throwaway test database:
-//
-//   - AC2: the database name must end in "_test" or equal "homepad_test".
-//   - AC3: the DSN host must NOT be the production CNPG cluster
-//     (homepad-pg-rw.homepad[.svc…]). This check is independent of the name, so
-//     a prod database mislabelled "homepad_test" is still refused.
-//
-// On 2026-09-13 this harness, pointed at the prod DSN from homepad-api#59,
-// truncated Caleb's entire Homepad catalog. This guard exists so that can never
-// recur. There is deliberately NO override env var: a copy-pasteable bypass is
-// exactly how the accident happened (AC4).
-func checkTestDatabase(dsn string) error {
-	u, err := url.Parse(dsn)
-	if err != nil {
-		return fmt.Errorf("refusing destructive test setup: cannot parse DATABASE_URL: %w", err)
-	}
-	host := u.Hostname()
-	// AC3 — hard-refuse the production cluster host, regardless of db name.
-	for _, prod := range []string{"homepad-pg-rw.homepad.svc", "homepad-pg-rw.homepad"} {
-		if strings.Contains(host, prod) {
-			return fmt.Errorf("refusing destructive test setup: DSN host %q is the production cluster (matches %q); this harness truncates every table and must never run against prod", host, prod)
-		}
-	}
-	// AC2 — only a throwaway test database may be migrated/truncated.
-	name := strings.TrimPrefix(u.Path, "/")
-	if name == "homepad_test" || strings.HasSuffix(name, "_test") {
-		return nil
-	}
-	return fmt.Errorf("refusing destructive test setup: database %q is not a test database (name must end in \"_test\" or equal \"homepad_test\") — this harness truncates every table", name)
 }
 
 func truncate(t *testing.T, ctx context.Context, dsn string) {

@@ -6,13 +6,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
 	"golang.org/x/crypto/bcrypt"
 
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/api"
+	"gitea.kube.calebdunn.tech/code/homepad-api/internal/dbguard"
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/session"
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/storage"
 )
@@ -27,10 +27,7 @@ import (
 // seeds one existing user first; the registration attempt is therefore the
 // SECOND user, where the gate actually applies.
 func TestRegistrationFailsClosed(t *testing.T) {
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		t.Skip("DATABASE_URL not set — skipping integration test (needs Postgres)")
-	}
+	dsn := dbguard.RequireTestDatabase(t)
 
 	ctx := context.Background()
 	store, err := storage.Open(ctx, dsn)
@@ -46,7 +43,7 @@ func TestRegistrationFailsClosed(t *testing.T) {
 		raw  string
 		want int
 	}{
-		{"open", http.StatusCreated},        // 201 — the one value that opens
+		{"open", http.StatusCreated},          // 201 — the one value that opens
 		{"invite_only", http.StatusForbidden}, // 403 — underscore spelling
 		{"invite-only", http.StatusForbidden}, // 403 — hyphen spelling
 		{"closed", http.StatusForbidden},      // 403 — unknown, fail closed
