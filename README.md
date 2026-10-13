@@ -2,11 +2,19 @@
   <img src="https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white" alt="Go 1.25">
   <img src="https://img.shields.io/badge/Postgres-backed-336791?logo=postgresql&logoColor=white" alt="Postgres">
   <img src="https://img.shields.io/badge/auth-local%20%2B%20PocketID%20OIDC-6366f1" alt="Local + PocketID OIDC">
-  <img src="https://img.shields.io/badge/tests-26%20Go%20passing-brightgreen" alt="26 Go tests passing">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License">
 </p>
 
 # homepad-api
+
+> **Looking for Homepad itself?** This is its backend. To run Homepad, use the
+> [quickstart](https://github.com/finish06/homepad#quickstart): one compose file
+> with published images for amd64 and arm64, and no build. Website:
+> [gethomepad.dev](https://gethomepad.dev) · live demo:
+> [demo.gethomepad.dev](https://demo.gethomepad.dev).
+>
+> Image: `ghcr.io/finish06/homepad-api:<version>`, tagged with the same version
+> as `ghcr.io/finish06/homepad`.
 
 Backend (Go) for **homepad** — the self-hosted homelab launcher with live uptime
 badges. Serves the shared service catalog, per-user favorites & ordering, admin
