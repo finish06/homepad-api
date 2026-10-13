@@ -1,0 +1,689 @@
+# GENERATED from internal/storage/seed/homepad_demo_board.json by
+# deploy/demo/gen-gatus-config.py. Do not edit by hand; regenerate.
+# JSON is valid YAML, so Gatus reads this file as-is.
+{
+  "web": {
+    "port": 8082
+  },
+  "storage": {
+    "type": "memory"
+  },
+  "endpoints": [
+    {
+      "name": "grafana",
+      "group": "demo",
+      "url": "https://grafana.com",
+      "interval": "5m",
+      "client": {
+        "timeout": "10s"
+      },
+      "conditions": [
+        "[CONNECTED] == true",
+        "[STATUS] < 500"
+      ]
+    },
+    {
+      "name": "prometheus",
+      "group": "demo",
+      "url": "https://prometheus.io",
+      "interval": "5m",
+      "client": {
+        "timeout": "10s"
+      },
+      "conditions": [
+        "[CONNECTED] == true",
+        "[STATUS] < 500"
+      ]
+    },
+    {
+      "name": "uptime-kuma",
+      "group": "demo",
+      "url": "https://uptime.kuma.pet",
+      "interval": "5m",
+      "client": {
+        "timeout": "10s"
+      },
+      "conditions": [
+        "[CONNECTED] == true",
+        "[STATUS] < 500"
+      ]
+    },
+    {
+      "name": "dozzle",
+      "group": "demo",
+      "url": "https://dozzle.dev",
+      "interval": "5m",
+      "client": {
+        "timeout": "10s"
+      },
+      "conditions": [
+        "[CONNECTED] == true",
+        "[STATUS] < 500"
+      ]
+    },
+    {
+      "name": "beszel",
+      "group": "demo",
+      "url": "https://beszel.dev",
+      "interval": "5m",
+      "client": {
+        "timeout": "10s"
+      },
+      "conditions": [
+        "[CONNECTED] == true",
+        "[STATUS] < 500"
+      ]
+    },
+    {
+      "name": "netdata",
+      "group": "demo",
+      "url": "https://www.netdata.cloud",
+      "interval": "5m",
+      "client": {
+        "timeout": "10s"
+      },
+      "conditions": [
+        "[CONNECTED] == true",
+        "[STATUS] < 500"
+      ]
+    },
+    {
+      "name": "homepage",
+      "group": "demo",
+      "url": "https://gethomepage.dev",
+      "interval": "5m",
+      "client": {
+        "timeout": "10s"
+      },
+      "conditions": [
+        "[CONNECTED] == true",
+        "[STATUS] < 500"
+      ]
+    },
+    {
+      "name": "homarr",
+      "group": "demo",
+      "url": "https://homarr.dev",
+      "interval": "5m",
+      "client": {
+        "timeout": "10s"
+      },
+      "conditions": [
+        "[CONNECTED] == true",
+        "[STATUS] < 500"
+      ]
+    },
+    {
+      "name": "dashy",
+      "group": "demo",
+      "url": "https://dashy.to",
+      "interval": "5m",
+      "client": {
+        "timeout": "10s"
+      },
+      "conditions": [
+        "[CONNECTED] == true",
+        "[STATUS] < 500"
+      ]
+    },
+    {
+      "name": "immich",
+      "group": "demo",
+      "url": "https://immich.app",
+      "interval": "5m",
+      "client": {
+        "timeout": "10s"
+      },
+      "conditions": [
+        "[CONNECTED] == true",
+        "[STATUS] < 500"
+      ]
+    },
+    {
+      "name": "photoprism",
+      "group": "demo",
+      "url": "https://www.photoprism.app",
+      "interval": "5m",
+      "client": {
+        "timeout": "10s"
+      },
+      "conditions": [
+        "[CONNECTED] == true",
+        "[STATUS] < 500"
+      ]
+    },
+    {
+      "name": "ente",
+      "group": "demo",
+      "url": "https://ente.io",
+      "interval": "5m",
+      "client": {
+        "timeout": "10s"
+      },
+      "conditions": [
+        "[CONNECTED] == true",
+        "[STATUS] < 500"
+      ]
+    },
+    {
+      "name": "jellyfin",
+      "group": "demo",
+      "url": "https://jellyfin.org",
+      "interval": "5m",
+      "client": {
+        "timeout": "10s"
+      },
+      "conditions": [
+        "[CONNECTED] == true",
+        "[STATUS] < 500"
+      ]
+    },
+    {
+      "name": "plex",
+      "group": "demo",
+      "url": "https://www.plex.tv",
+      "interval": "5m",
+      "client": {
+        "timeout": "10s"
+      },
+      "conditions": [
+        "[CONNECTED] == true",
+        "[STATUS] < 500"
+      ]
+    },
+    {
+      "name": "emby",
+      "group": "demo",
+      "url": "https://emby.media",
+      "interval": "5m",
+      "client": {
+        "timeout": "10s"
+      },
+      "conditions": [
+        "[CONNECTED] == true",
+        "[STATUS] < 500"
+      ]
+    },
+    {
+      "name": "navidrome",
+      "group": "demo",
+      "url": "https://www.navidrome.org",
+      "interval": "5m",
+      "client": {
+        "timeout": "10s"
+      },
+      "conditions": [
+        "[CONNECTED] == true",
+        "[STATUS] < 500"
+      ]
+    },
+    {
+      "name": "audiobookshelf",
+      "group": "demo",
+      "url": "https://www.audiobookshelf.org",
+      "interval": "5m",
+      "client": {
+        "timeout": "10s"
+      },
+      "conditions": [
+        "[CONNECTED] == true",
+        "[STATUS] < 500"
+      ]
+    },
+    {
+      "name": "paperless-ngx",
+      "group": "demo",
+      "url": "https://docs.paperless-ngx.com",
+      "interval": "5m",
+      "client": {
+        "timeout": "10s"
+      },
+      "conditions": [
+        "[CONNECTED] == true",
+        "[STATUS] < 500"
+      ]
+    },
+    {
+      "name": "outline",
+      "group": "demo",
+      "url": "https://www.getoutline.com",
+      "interval": "5m",
+      "client": {
+        "timeout": "10s"
+      },
+      "conditions": [
+        "[CONNECTED] == true",
+        "[STATUS] < 500"
+      ]
+    },
+    {
+      "name": "bookstack",
+      "group": "demo",
+      "url": "https://www.bookstackapp.com",
+      "interval": "5m",
+      "client": {
+        "timeout": "10s"
+      },
+      "conditions": [
+        "[CONNECTED] == true",
+        "[STATUS] < 500"
+      ]
+    },
+    {
+      "name": "joplin",
+      "group": "demo",
+      "url": "https://joplinapp.org",
+      "interval": "5m",
+      "client": {
+        "timeout": "10s"
+      },
+      "conditions": [
+        "[CONNECTED] == true",
+        "[STATUS] < 500"
+      ]
+    },
+    {
+      "name": "docmost",
+      "group": "demo",
+      "url": "https://docmost.com",
+      "interval": "5m",
+      "client": {
+        "timeout": "10s"
+      },
+      "conditions": [
+        "[CONNECTED] == true",
+        "[STATUS] < 500"
+      ]
+    },
+    {
+      "name": "nextcloud",
+      "group": "demo",
+      "url": "https://nextcloud.com",
+      "interval": "5m",
+      "client": {
+        "timeout": "10s"
+      },
+      "conditions": [
+        "[CONNECTED] == true",
+        "[STATUS] < 500"
+      ]
+    },
+    {
+      "name": "syncthing",
+      "group": "demo",
+      "url": "https://syncthing.net",
+      "interval": "5m",
+      "client": {
+        "timeout": "10s"
+      },
+      "conditions": [
+        "[CONNECTED] == true",
+        "[STATUS] < 500"
+      ]
+    },
+    {
+      "name": "seafile",
+      "group": "demo",
+      "url": "https://www.seafile.com",
+      "interval": "5m",
+      "client": {
+        "timeout": "10s"
+      },
+      "conditions": [
+        "[CONNECTED] == true",
+        "[STATUS] < 500"
+      ]
+    },
+    {
+      "name": "file-browser",
+      "group": "demo",
+      "url": "https://filebrowser.org",
+      "interval": "5m",
+      "client": {
+        "timeout": "10s"
+      },
+      "conditions": [
+        "[CONNECTED] == true",
+        "[STATUS] < 500"
+      ]
+    },
+    {
+      "name": "home-assistant",
+      "group": "demo",
+      "url": "https://www.home-assistant.io",
+      "interval": "5m",
+      "client": {
+        "timeout": "10s"
+      },
+      "conditions": [
+        "[CONNECTED] == true",
+        "[STATUS] < 500"
+      ]
+    },
+    {
+      "name": "esphome",
+      "group": "demo",
+      "url": "https://esphome.io",
+      "interval": "5m",
+      "client": {
+        "timeout": "10s"
+      },
+      "conditions": [
+        "[CONNECTED] == true",
+        "[STATUS] < 500"
+      ]
+    },
+    {
+      "name": "node-red",
+      "group": "demo",
+      "url": "https://nodered.org",
+      "interval": "5m",
+      "client": {
+        "timeout": "10s"
+      },
+      "conditions": [
+        "[CONNECTED] == true",
+        "[STATUS] < 500"
+      ]
+    },
+    {
+      "name": "zigbee2mqtt",
+      "group": "demo",
+      "url": "https://www.zigbee2mqtt.io",
+      "interval": "5m",
+      "client": {
+        "timeout": "10s"
+      },
+      "conditions": [
+        "[CONNECTED] == true",
+        "[STATUS] < 500"
+      ]
+    },
+    {
+      "name": "pi-hole",
+      "group": "demo",
+      "url": "https://pi-hole.net",
+      "interval": "5m",
+      "client": {
+        "timeout": "10s"
+      },
+      "conditions": [
+        "[CONNECTED] == true",
+        "[STATUS] < 500"
+      ]
+    },
+    {
+      "name": "adguard-home",
+      "group": "demo",
+      "url": "https://adguard.com/en/adguard-home/overview.html",
+      "interval": "5m",
+      "client": {
+        "timeout": "10s"
+      },
+      "conditions": [
+        "[CONNECTED] == true",
+        "[STATUS] < 500"
+      ]
+    },
+    {
+      "name": "traefik",
+      "group": "demo",
+      "url": "https://traefik.io",
+      "interval": "5m",
+      "client": {
+        "timeout": "10s"
+      },
+      "conditions": [
+        "[CONNECTED] == true",
+        "[STATUS] < 500"
+      ]
+    },
+    {
+      "name": "nginx-proxy-manager",
+      "group": "demo",
+      "url": "https://nginxproxymanager.com",
+      "interval": "5m",
+      "client": {
+        "timeout": "10s"
+      },
+      "conditions": [
+        "[CONNECTED] == true",
+        "[STATUS] < 500"
+      ]
+    },
+    {
+      "name": "tailscale",
+      "group": "demo",
+      "url": "https://tailscale.com",
+      "interval": "5m",
+      "client": {
+        "timeout": "10s"
+      },
+      "conditions": [
+        "[CONNECTED] == true",
+        "[STATUS] < 500"
+      ]
+    },
+    {
+      "name": "authentik",
+      "group": "demo",
+      "url": "https://goauthentik.io",
+      "interval": "5m",
+      "client": {
+        "timeout": "10s"
+      },
+      "conditions": [
+        "[CONNECTED] == true",
+        "[STATUS] < 500"
+      ]
+    },
+    {
+      "name": "keycloak",
+      "group": "demo",
+      "url": "https://www.keycloak.org",
+      "interval": "5m",
+      "client": {
+        "timeout": "10s"
+      },
+      "conditions": [
+        "[CONNECTED] == true",
+        "[STATUS] < 500"
+      ]
+    },
+    {
+      "name": "authelia",
+      "group": "demo",
+      "url": "https://www.authelia.com",
+      "interval": "5m",
+      "client": {
+        "timeout": "10s"
+      },
+      "conditions": [
+        "[CONNECTED] == true",
+        "[STATUS] < 500"
+      ]
+    },
+    {
+      "name": "pocket-id",
+      "group": "demo",
+      "url": "https://pocket-id.org",
+      "interval": "5m",
+      "client": {
+        "timeout": "10s"
+      },
+      "conditions": [
+        "[CONNECTED] == true",
+        "[STATUS] < 500"
+      ]
+    },
+    {
+      "name": "vikunja",
+      "group": "demo",
+      "url": "https://vikunja.io",
+      "interval": "5m",
+      "client": {
+        "timeout": "10s"
+      },
+      "conditions": [
+        "[CONNECTED] == true",
+        "[STATUS] < 500"
+      ]
+    },
+    {
+      "name": "actual-budget",
+      "group": "demo",
+      "url": "https://actualbudget.org",
+      "interval": "5m",
+      "client": {
+        "timeout": "10s"
+      },
+      "conditions": [
+        "[CONNECTED] == true",
+        "[STATUS] < 500"
+      ]
+    },
+    {
+      "name": "mealie",
+      "group": "demo",
+      "url": "https://mealie.io",
+      "interval": "5m",
+      "client": {
+        "timeout": "10s"
+      },
+      "conditions": [
+        "[CONNECTED] == true",
+        "[STATUS] < 500"
+      ]
+    },
+    {
+      "name": "firefly-iii",
+      "group": "demo",
+      "url": "https://www.firefly-iii.org",
+      "interval": "5m",
+      "client": {
+        "timeout": "10s"
+      },
+      "conditions": [
+        "[CONNECTED] == true",
+        "[STATUS] < 500"
+      ]
+    },
+    {
+      "name": "n8n",
+      "group": "demo",
+      "url": "https://n8n.io",
+      "interval": "5m",
+      "client": {
+        "timeout": "10s"
+      },
+      "conditions": [
+        "[CONNECTED] == true",
+        "[STATUS] < 500"
+      ]
+    },
+    {
+      "name": "gitea",
+      "group": "demo",
+      "url": "https://gitea.com",
+      "interval": "5m",
+      "client": {
+        "timeout": "10s"
+      },
+      "conditions": [
+        "[CONNECTED] == true",
+        "[STATUS] < 500"
+      ]
+    },
+    {
+      "name": "forgejo",
+      "group": "demo",
+      "url": "https://forgejo.org",
+      "interval": "5m",
+      "client": {
+        "timeout": "10s"
+      },
+      "conditions": [
+        "[CONNECTED] == true",
+        "[STATUS] < 500"
+      ]
+    },
+    {
+      "name": "coder",
+      "group": "demo",
+      "url": "https://coder.com",
+      "interval": "5m",
+      "client": {
+        "timeout": "10s"
+      },
+      "conditions": [
+        "[CONNECTED] == true",
+        "[STATUS] < 500"
+      ]
+    },
+    {
+      "name": "woodpecker-ci",
+      "group": "demo",
+      "url": "https://woodpecker-ci.org",
+      "interval": "5m",
+      "client": {
+        "timeout": "10s"
+      },
+      "conditions": [
+        "[CONNECTED] == true",
+        "[STATUS] < 500"
+      ]
+    },
+    {
+      "name": "duplicati",
+      "group": "demo",
+      "url": "https://www.duplicati.com",
+      "interval": "5m",
+      "client": {
+        "timeout": "10s"
+      },
+      "conditions": [
+        "[CONNECTED] == true",
+        "[STATUS] < 500"
+      ]
+    },
+    {
+      "name": "kopia",
+      "group": "demo",
+      "url": "https://kopia.io",
+      "interval": "5m",
+      "client": {
+        "timeout": "10s"
+      },
+      "conditions": [
+        "[CONNECTED] == true",
+        "[STATUS] < 500"
+      ]
+    },
+    {
+      "name": "restic",
+      "group": "demo",
+      "url": "https://restic.net",
+      "interval": "5m",
+      "client": {
+        "timeout": "10s"
+      },
+      "conditions": [
+        "[CONNECTED] == true",
+        "[STATUS] < 500"
+      ]
+    },
+    {
+      "name": "portainer",
+      "group": "demo",
+      "url": "https://www.portainer.io",
+      "interval": "5m",
+      "client": {
+        "timeout": "10s"
+      },
+      "conditions": [
+        "[CONNECTED] == true",
+        "[STATUS] < 500"
+      ]
+    }
+  ]
+}
