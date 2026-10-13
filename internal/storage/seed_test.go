@@ -51,8 +51,8 @@ func TestSeedLibraryIfEmpty_SeedsFreshDB(t *testing.T) {
 		names = append(names, o.Name)
 		cats = append(cats, o.SuggestedCategory)
 	}
-	require.Contains(t, names, "PocketID", "the committed prod catalog must be seeded")
-	require.Contains(t, cats, "External", "gatus group must map to a curated suggested category")
+	require.Contains(t, names, "Grafana", "the committed public catalog must be seeded")
+	require.Contains(t, cats, "Monitoring", "a seed entry's group must map to its suggested category")
 }
 
 // Idempotency: once any offer exists the seed is a no-op, so admin curation is
