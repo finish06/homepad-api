@@ -11,12 +11,15 @@
 //	<out>/api/v1/endpoints/statuses
 //	<out>/api/v1/endpoints/<key>/uptimes/<window>   (24h, 7d, 30d)
 //
-// Upload <out> to a public bucket and set the demo api's GATUS_BASE_URL to it.
+// Publish <out> as a static site and set the demo api's GATUS_BASE_URL to it. In
+// production that is the Firebase Hosting site gethomepad-status, served with
+// Content-Type application/json and Cache-Control max-age=60 (homepad-api #80).
 //
 // Only keys starting with -prefix (default "demo_") are written. Everything else
 // the homelab Gatus monitors is dropped before anything touches disk: this
 // snapshot is published to the internet, and the homelab's own endpoint names
-// and URLs must never be in it.
+// and URLs must never be in it. That makes the prefix a contract: no homelab
+// endpoint outside the demo group may ever be keyed demo_, or it is published.
 package main
 
 import (

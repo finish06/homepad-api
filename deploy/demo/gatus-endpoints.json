@@ -3,7 +3,7 @@
     "name": "grafana",
     "group": "demo",
     "url": "https://grafana.com",
-    "interval": "2m",
+    "interval": "5m",
     "client": {
       "timeout": "10s"
     },
@@ -16,7 +16,7 @@
     "name": "prometheus",
     "group": "demo",
     "url": "https://prometheus.io",
-    "interval": "2m",
+    "interval": "5m",
     "client": {
       "timeout": "10s"
     },
@@ -29,7 +29,7 @@
     "name": "uptime-kuma",
     "group": "demo",
     "url": "https://uptime.kuma.pet",
-    "interval": "2m",
+    "interval": "5m",
     "client": {
       "timeout": "10s"
     },
@@ -42,7 +42,7 @@
     "name": "dozzle",
     "group": "demo",
     "url": "https://dozzle.dev",
-    "interval": "2m",
+    "interval": "5m",
     "client": {
       "timeout": "10s"
     },
@@ -55,7 +55,7 @@
     "name": "beszel",
     "group": "demo",
     "url": "https://beszel.dev",
-    "interval": "2m",
+    "interval": "5m",
     "client": {
       "timeout": "10s"
     },
@@ -68,7 +68,7 @@
     "name": "netdata",
     "group": "demo",
     "url": "https://www.netdata.cloud",
-    "interval": "2m",
+    "interval": "5m",
     "client": {
       "timeout": "10s"
     },
@@ -81,7 +81,7 @@
     "name": "homepage",
     "group": "demo",
     "url": "https://gethomepage.dev",
-    "interval": "2m",
+    "interval": "5m",
     "client": {
       "timeout": "10s"
     },
@@ -94,7 +94,7 @@
     "name": "homarr",
     "group": "demo",
     "url": "https://homarr.dev",
-    "interval": "2m",
+    "interval": "5m",
     "client": {
       "timeout": "10s"
     },
@@ -107,7 +107,7 @@
     "name": "dashy",
     "group": "demo",
     "url": "https://dashy.to",
-    "interval": "2m",
+    "interval": "5m",
     "client": {
       "timeout": "10s"
     },
@@ -120,7 +120,7 @@
     "name": "immich",
     "group": "demo",
     "url": "https://immich.app",
-    "interval": "2m",
+    "interval": "5m",
     "client": {
       "timeout": "10s"
     },
@@ -133,7 +133,7 @@
     "name": "photoprism",
     "group": "demo",
     "url": "https://www.photoprism.app",
-    "interval": "2m",
+    "interval": "5m",
     "client": {
       "timeout": "10s"
     },
@@ -146,7 +146,7 @@
     "name": "ente",
     "group": "demo",
     "url": "https://ente.io",
-    "interval": "2m",
+    "interval": "5m",
     "client": {
       "timeout": "10s"
     },
@@ -159,7 +159,7 @@
     "name": "jellyfin",
     "group": "demo",
     "url": "https://jellyfin.org",
-    "interval": "2m",
+    "interval": "5m",
     "client": {
       "timeout": "10s"
     },
@@ -172,7 +172,7 @@
     "name": "plex",
     "group": "demo",
     "url": "https://www.plex.tv",
-    "interval": "2m",
+    "interval": "5m",
     "client": {
       "timeout": "10s"
     },
@@ -185,7 +185,7 @@
     "name": "emby",
     "group": "demo",
     "url": "https://emby.media",
-    "interval": "2m",
+    "interval": "5m",
     "client": {
       "timeout": "10s"
     },
@@ -198,7 +198,7 @@
     "name": "navidrome",
     "group": "demo",
     "url": "https://www.navidrome.org",
-    "interval": "2m",
+    "interval": "5m",
     "client": {
       "timeout": "10s"
     },
@@ -211,7 +211,7 @@
     "name": "audiobookshelf",
     "group": "demo",
     "url": "https://www.audiobookshelf.org",
-    "interval": "2m",
+    "interval": "5m",
     "client": {
       "timeout": "10s"
     },
@@ -224,7 +224,7 @@
     "name": "paperless-ngx",
     "group": "demo",
     "url": "https://docs.paperless-ngx.com",
-    "interval": "2m",
+    "interval": "5m",
     "client": {
       "timeout": "10s"
     },
@@ -237,7 +237,7 @@
     "name": "outline",
     "group": "demo",
     "url": "https://www.getoutline.com",
-    "interval": "2m",
+    "interval": "5m",
     "client": {
       "timeout": "10s"
     },
@@ -250,7 +250,7 @@
     "name": "bookstack",
     "group": "demo",
     "url": "https://www.bookstackapp.com",
-    "interval": "2m",
+    "interval": "5m",
     "client": {
       "timeout": "10s"
     },
@@ -263,7 +263,7 @@
     "name": "joplin",
     "group": "demo",
     "url": "https://joplinapp.org",
-    "interval": "2m",
+    "interval": "5m",
     "client": {
       "timeout": "10s"
     },
@@ -276,7 +276,7 @@
     "name": "docmost",
     "group": "demo",
     "url": "https://docmost.com",
-    "interval": "2m",
+    "interval": "5m",
     "client": {
       "timeout": "10s"
     },
@@ -289,7 +289,7 @@
     "name": "nextcloud",
     "group": "demo",
     "url": "https://nextcloud.com",
-    "interval": "2m",
+    "interval": "5m",
     "client": {
       "timeout": "10s"
     },
@@ -302,7 +302,7 @@
     "name": "syncthing",
     "group": "demo",
     "url": "https://syncthing.net",
-    "interval": "2m",
+    "interval": "5m",
     "client": {
       "timeout": "10s"
     },
@@ -315,7 +315,7 @@
     "name": "seafile",
     "group": "demo",
     "url": "https://www.seafile.com",
-    "interval": "2m",
+    "interval": "5m",
     "client": {
       "timeout": "10s"
     },
@@ -328,7 +328,7 @@
     "name": "file-browser",
     "group": "demo",
     "url": "https://filebrowser.org",
-    "interval": "2m",
+    "interval": "5m",
     "client": {
       "timeout": "10s"
     },
@@ -341,7 +341,7 @@
     "name": "home-assistant",
     "group": "demo",
     "url": "https://www.home-assistant.io",
-    "interval": "2m",
+    "interval": "5m",
     "client": {
       "timeout": "10s"
     },
@@ -354,7 +354,7 @@
     "name": "esphome",
     "group": "demo",
     "url": "https://esphome.io",
-    "interval": "2m",
+    "interval": "5m",
     "client": {
       "timeout": "10s"
     },
@@ -367,7 +367,7 @@
     "name": "node-red",
     "group": "demo",
     "url": "https://nodered.org",
-    "interval": "2m",
+    "interval": "5m",
     "client": {
       "timeout": "10s"
     },
@@ -380,7 +380,7 @@
     "name": "zigbee2mqtt",
     "group": "demo",
     "url": "https://www.zigbee2mqtt.io",
-    "interval": "2m",
+    "interval": "5m",
     "client": {
       "timeout": "10s"
     },
@@ -393,7 +393,7 @@
     "name": "pi-hole",
     "group": "demo",
     "url": "https://pi-hole.net",
-    "interval": "2m",
+    "interval": "5m",
     "client": {
       "timeout": "10s"
     },
@@ -406,7 +406,7 @@
     "name": "adguard-home",
     "group": "demo",
     "url": "https://adguard.com/en/adguard-home/overview.html",
-    "interval": "2m",
+    "interval": "5m",
     "client": {
       "timeout": "10s"
     },
@@ -419,7 +419,7 @@
     "name": "traefik",
     "group": "demo",
     "url": "https://traefik.io",
-    "interval": "2m",
+    "interval": "5m",
     "client": {
       "timeout": "10s"
     },
@@ -432,7 +432,7 @@
     "name": "nginx-proxy-manager",
     "group": "demo",
     "url": "https://nginxproxymanager.com",
-    "interval": "2m",
+    "interval": "5m",
     "client": {
       "timeout": "10s"
     },
@@ -445,7 +445,7 @@
     "name": "tailscale",
     "group": "demo",
     "url": "https://tailscale.com",
-    "interval": "2m",
+    "interval": "5m",
     "client": {
       "timeout": "10s"
     },
@@ -458,7 +458,7 @@
     "name": "authentik",
     "group": "demo",
     "url": "https://goauthentik.io",
-    "interval": "2m",
+    "interval": "5m",
     "client": {
       "timeout": "10s"
     },
@@ -471,7 +471,7 @@
     "name": "keycloak",
     "group": "demo",
     "url": "https://www.keycloak.org",
-    "interval": "2m",
+    "interval": "5m",
     "client": {
       "timeout": "10s"
     },
@@ -484,7 +484,7 @@
     "name": "authelia",
     "group": "demo",
     "url": "https://www.authelia.com",
-    "interval": "2m",
+    "interval": "5m",
     "client": {
       "timeout": "10s"
     },
@@ -497,7 +497,7 @@
     "name": "pocket-id",
     "group": "demo",
     "url": "https://pocket-id.org",
-    "interval": "2m",
+    "interval": "5m",
     "client": {
       "timeout": "10s"
     },
@@ -510,7 +510,7 @@
     "name": "vikunja",
     "group": "demo",
     "url": "https://vikunja.io",
-    "interval": "2m",
+    "interval": "5m",
     "client": {
       "timeout": "10s"
     },
@@ -523,7 +523,7 @@
     "name": "actual-budget",
     "group": "demo",
     "url": "https://actualbudget.org",
-    "interval": "2m",
+    "interval": "5m",
     "client": {
       "timeout": "10s"
     },
@@ -536,7 +536,7 @@
     "name": "mealie",
     "group": "demo",
     "url": "https://mealie.io",
-    "interval": "2m",
+    "interval": "5m",
     "client": {
       "timeout": "10s"
     },
@@ -549,7 +549,7 @@
     "name": "firefly-iii",
     "group": "demo",
     "url": "https://www.firefly-iii.org",
-    "interval": "2m",
+    "interval": "5m",
     "client": {
       "timeout": "10s"
     },
@@ -562,7 +562,7 @@
     "name": "n8n",
     "group": "demo",
     "url": "https://n8n.io",
-    "interval": "2m",
+    "interval": "5m",
     "client": {
       "timeout": "10s"
     },
@@ -575,7 +575,7 @@
     "name": "gitea",
     "group": "demo",
     "url": "https://gitea.com",
-    "interval": "2m",
+    "interval": "5m",
     "client": {
       "timeout": "10s"
     },
@@ -588,7 +588,7 @@
     "name": "forgejo",
     "group": "demo",
     "url": "https://forgejo.org",
-    "interval": "2m",
+    "interval": "5m",
     "client": {
       "timeout": "10s"
     },
@@ -601,7 +601,7 @@
     "name": "coder",
     "group": "demo",
     "url": "https://coder.com",
-    "interval": "2m",
+    "interval": "5m",
     "client": {
       "timeout": "10s"
     },
@@ -614,7 +614,7 @@
     "name": "woodpecker-ci",
     "group": "demo",
     "url": "https://woodpecker-ci.org",
-    "interval": "2m",
+    "interval": "5m",
     "client": {
       "timeout": "10s"
     },
@@ -627,7 +627,7 @@
     "name": "duplicati",
     "group": "demo",
     "url": "https://www.duplicati.com",
-    "interval": "2m",
+    "interval": "5m",
     "client": {
       "timeout": "10s"
     },
@@ -640,7 +640,7 @@
     "name": "kopia",
     "group": "demo",
     "url": "https://kopia.io",
-    "interval": "2m",
+    "interval": "5m",
     "client": {
       "timeout": "10s"
     },
@@ -653,7 +653,7 @@
     "name": "restic",
     "group": "demo",
     "url": "https://restic.net",
-    "interval": "2m",
+    "interval": "5m",
     "client": {
       "timeout": "10s"
     },
@@ -666,7 +666,7 @@
     "name": "portainer",
     "group": "demo",
     "url": "https://www.portainer.io",
-    "interval": "2m",
+    "interval": "5m",
     "client": {
       "timeout": "10s"
     },

@@ -9,8 +9,9 @@ background checker never gets to run (homepad-api #76). cmd/demo-status-snapshot
 publishes the results, and the demo reads that snapshot as its GATUS_BASE_URL.
 
 Up = reachable and status < 500 (a CDN's bot-wall 403 still means the site is up).
-Every 2m, so a snapshot published every 2m stays inside homepad's 5-minute
-"fresh" band. TestDemoGatusConfigCoversBoard keeps this file and the board in sync.
+Every 5m, Caleb's decision (homepad-api #79): 52 checks at 2m would be ~37k
+requests/day against other people's sites, for freshness a demo board does not
+need. The snapshot CronJob also runs every 5m. TestDemoGatusConfigCoversBoard keeps this file and the board in sync.
 
 JSON is valid YAML: paste the array under `endpoints:` in the homelab Gatus config.
 """
@@ -20,7 +21,7 @@ board = json.loads((root / "internal/storage/seed/homepad_demo_board.json").read
 eps = []
 for e in board:
     slug = re.sub(r"[^a-z0-9]+", "-", e["name"].lower()).strip("-")
-    eps.append({"name": slug, "group": "demo", "url": e["url"], "interval": "2m",
+    eps.append({"name": slug, "group": "demo", "url": e["url"], "interval": "5m",
                 "client": {"timeout": "10s"},
                 "conditions": ["[CONNECTED] == true", "[STATUS] < 500"]})
 (root / "deploy/demo/gatus-endpoints.json").write_text(json.dumps(eps, indent=2) + "\n")
