@@ -106,15 +106,18 @@ func (s *Store) SeedDemoIfNoUsers(ctx context.Context) (bool, error) {
 	}
 
 	for _, e := range entries {
-		slug := strings.Trim(demoSlugRe.ReplaceAllString(strings.ToLower(e.Name), "-"), "-")
+		slug := demoSlug(e.Name)
 		var cid interface{}
 		if id, ok := catID[e.Category]; ok {
 			cid = id
 		}
+		// demo_<slug> is the Gatus key of this tile's check in
+		// deploy/demo/gatus.yaml (group "demo", endpoint name = slug), so every demo
+		// tile shows the live health of its project's public site.
 		if _, err := tx.Exec(ctx,
-			`INSERT INTO services (slug, name, description, url, icon, category_id, user_id)
-			 VALUES ($1, $2, $3, $4, $5, $6::uuid, $7::uuid)`,
-			slug, e.Name, e.Description, e.URL, e.Icon, cid, uid); err != nil {
+			`INSERT INTO services (slug, name, description, url, icon, category_id, user_id, gatus_key)
+			 VALUES ($1, $2, $3, $4, $5, $6::uuid, $7::uuid, $8)`,
+			slug, e.Name, e.Description, e.URL, e.Icon, cid, uid, demoGatusKey(slug)); err != nil {
 			return false, fmt.Errorf("storage.SeedDemoIfNoUsers: service %q: %w", e.Name, err)
 		}
 	}
@@ -123,4 +126,14 @@ func (s *Store) SeedDemoIfNoUsers(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	return true, nil
+}
+
+// demoGatusKey is the key Gatus derives for an endpoint named slug in group
+// "demo": "<group>_<name>". Slugs are already [a-z0-9-], which Gatus's key
+// sanitizer leaves unchanged.
+func demoGatusKey(slug string) string { return "demo_" + slug }
+
+// demoSlug is the slug SeedDemoIfNoUsers gives a board entry.
+func demoSlug(name string) string {
+	return strings.Trim(demoSlugRe.ReplaceAllString(strings.ToLower(name), "-"), "-")
 }
