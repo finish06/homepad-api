@@ -138,8 +138,8 @@ func loginAs(t *testing.T, srv *httptest.Server, userAgent string, send ...*http
 	return ck
 }
 
-// getMe calls /api/me with only the given session cookie.
-func getMe(t *testing.T, srv *httptest.Server, ck *http.Cookie) *http.Response {
+// meWithCookie calls /api/me with only the given session cookie.
+func meWithCookie(t *testing.T, srv *httptest.Server, ck *http.Cookie) *http.Response {
 	t.Helper()
 	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/me", nil)
 	req.AddCookie(&http.Cookie{Name: ck.Name, Value: ck.Value})
@@ -184,14 +184,14 @@ func TestSessionSurvivesAPIRestart(t *testing.T) {
 	dsn, store, _, _ := sessionDB(t)
 	first := startAPI(t, store, nil)
 	ck := loginAs(t, first, "")
-	require.Equal(t, http.StatusOK, getMe(t, first, ck).StatusCode)
+	require.Equal(t, http.StatusOK, meWithCookie(t, first, ck).StatusCode)
 
 	// Kill the first instance completely.
 	first.Close()
 	store.Close()
 
 	second := startAPI(t, openStore(t, dsn), nil)
-	assert.Equal(t, http.StatusOK, getMe(t, second, ck).StatusCode,
+	assert.Equal(t, http.StatusOK, meWithCookie(t, second, ck).StatusCode,
 		"the same cookie must still be signed in after a restart")
 }
 
@@ -212,7 +212,7 @@ func TestLoginCookieCarriesMaxAge(t *testing.T) {
 func TestRawSessionTokenNeverInDatabase(t *testing.T) {
 	_, store, conn, _ := sessionDB(t)
 	srv := startAPI(t, store, nil)
-	tokens := []string{loginAs(t, srv, "a"), loginAs(t, srv, "b")}
+	tokens := []*http.Cookie{loginAs(t, srv, "a"), loginAs(t, srv, "b")}
 
 	ctx := context.Background()
 	var needles []string
@@ -272,7 +272,7 @@ func TestSessionExpiresAfterIdleLifetime(t *testing.T) {
 	ck := loginAs(t, srv, "")
 
 	clk.Advance(30 * 24 * time.Hour)
-	resp := getMe(t, srv, ck)
+	resp := meWithCookie(t, srv, ck)
 	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode, "30 idle days later the session is over")
 	assert.Nil(t, sessionCookieFrom(resp), "an expired session is not refreshed")
 }
@@ -295,7 +295,7 @@ func TestSessionSlidesWithOneMinuteThrottle(t *testing.T) {
 
 	// 30s later: a poll. No write, no cookie.
 	clk.Advance(30 * time.Second)
-	resp := getMe(t, srv, ck)
+	resp := meWithCookie(t, srv, ck)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.Nil(t, sessionCookieFrom(resp), "no cookie re-issue inside the minute")
 	r1, _ := rowFor(t, conn, ck.Value)
@@ -304,7 +304,7 @@ func TestSessionSlidesWithOneMinuteThrottle(t *testing.T) {
 	// 60s after the write: the slide.
 	clk.Advance(30 * time.Second)
 	t1 := clk.Now()
-	resp = getMe(t, srv, ck)
+	resp = meWithCookie(t, srv, ck)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	re := sessionCookieFrom(resp)
 	require.NotNil(t, re, "the slide re-issues the cookie")
@@ -319,7 +319,7 @@ func TestSessionSlidesWithOneMinuteThrottle(t *testing.T) {
 
 	// 10s later: throttled again.
 	clk.Advance(10 * time.Second)
-	resp = getMe(t, srv, ck)
+	resp = meWithCookie(t, srv, ck)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.Nil(t, sessionCookieFrom(resp))
 	r3, _ := rowFor(t, conn, ck.Value)
@@ -328,7 +328,7 @@ func TestSessionSlidesWithOneMinuteThrottle(t *testing.T) {
 	// Used every 20 days, it outlives its first 30.
 	for day := 20; day <= 60; day += 20 {
 		clk.Advance(20 * 24 * time.Hour)
-		assert.Equal(t, http.StatusOK, getMe(t, srv, ck).StatusCode, "day %d: still signed in", day)
+		assert.Equal(t, http.StatusOK, meWithCookie(t, srv, ck).StatusCode, "day %d: still signed in", day)
 	}
 }
 
@@ -351,9 +351,9 @@ func TestLogoutDeletesSessionRow(t *testing.T) {
 	assert.Equal(t, -1, cleared.MaxAge, "logout clears the cookie")
 
 	assert.Equal(t, 0, countSessions(t, conn, uid), "logout deletes the session row")
-	assert.Equal(t, http.StatusUnauthorized, getMe(t, srv, ck).StatusCode)
+	assert.Equal(t, http.StatusUnauthorized, meWithCookie(t, srv, ck).StatusCode)
 	other := startAPI(t, openStore(t, dsn), nil)
-	assert.Equal(t, http.StatusUnauthorized, getMe(t, other, ck).StatusCode)
+	assert.Equal(t, http.StatusUnauthorized, meWithCookie(t, other, ck).StatusCode)
 }
 
 // The User-Agent is captured on create, and a hostile one never fails sign-in.
@@ -382,12 +382,12 @@ func TestReLoginReplacesThisBrowsersSession(t *testing.T) {
 	second := loginAs(t, srv, "", first)
 	assert.NotEqual(t, first.Value, second.Value)
 	assert.Equal(t, 1, countSessions(t, conn, uid), "the browser's old session is replaced")
-	assert.Equal(t, http.StatusUnauthorized, getMe(t, srv, first).StatusCode)
-	assert.Equal(t, http.StatusOK, getMe(t, srv, second).StatusCode)
+	assert.Equal(t, http.StatusUnauthorized, meWithCookie(t, srv, first).StatusCode)
+	assert.Equal(t, http.StatusOK, meWithCookie(t, srv, second).StatusCode)
 
 	// A different device signing in does not touch the first device's session.
 	third := loginAs(t, srv, "")
 	assert.Equal(t, 2, countSessions(t, conn, uid))
-	assert.Equal(t, http.StatusOK, getMe(t, srv, second).StatusCode)
-	assert.Equal(t, http.StatusOK, getMe(t, srv, third).StatusCode)
+	assert.Equal(t, http.StatusOK, meWithCookie(t, srv, second).StatusCode)
+	assert.Equal(t, http.StatusOK, meWithCookie(t, srv, third).StatusCode)
 }

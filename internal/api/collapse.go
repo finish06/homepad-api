@@ -9,7 +9,7 @@ import (
 // set (v5). Session-gated; a user only reads their own set. Default is empty
 // (everything expanded).
 func (s *server) handleGetCollapsedCategories(w http.ResponseWriter, r *http.Request) {
-	u, ok := s.currentUser(r)
+	u, ok := s.currentUser(w, r)
 	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
@@ -28,7 +28,7 @@ func (s *server) handleGetCollapsedCategories(w http.ResponseWriter, r *http.Req
 // dropped (the storage layer keeps only ids naming a live category), so this is
 // never a 4xx for a category deleted between read and write. Success is 204.
 func (s *server) handleSetCollapsedCategories(w http.ResponseWriter, r *http.Request) {
-	u, ok := s.currentUser(r)
+	u, ok := s.currentUser(w, r)
 	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return

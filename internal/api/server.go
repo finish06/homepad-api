@@ -20,7 +20,7 @@ const oidcPendingTTL = 10 * time.Minute
 type Deps struct {
 	Store        *storage.Store
 	Poller       *gatus.Poller
-	Sessions     *session.Manager
+	Sessions     session.Store
 	Registration RegistrationMode
 	OIDC         oidc.Config
 }
@@ -28,7 +28,7 @@ type Deps struct {
 type server struct {
 	store        *storage.Store
 	poller       *gatus.Poller
-	sessions     *session.Manager
+	sessions     session.Store
 	registration RegistrationMode
 	cookieSecure bool
 	oidc         oidc.Config

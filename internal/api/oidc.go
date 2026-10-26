@@ -100,18 +100,12 @@ func (s *server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := s.sessions.Create(u.ID)
-	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+	// Secure stays off here, exactly as before persistent sessions: this
+	// callback has never honoured COOKIE_SECURE. Aligning it with local login
+	// is a separate, deliberate change.
+	if !s.startSession(w, r, u, false) {
 		return
 	}
-	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookie,
-		Value:    token,
-		Path:     "/",
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-	})
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 

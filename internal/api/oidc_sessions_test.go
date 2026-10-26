@@ -36,6 +36,6 @@ func TestOIDCLoginCreatesPersistentSession(t *testing.T) {
 	// Restart: a new process on the same DB still honours the cookie.
 	homepad.Close()
 	restarted := startAPI(t, openStore(t, store.DSN), nil)
-	assert.Equal(t, http.StatusOK, getMe(t, restarted, cookie).StatusCode,
+	assert.Equal(t, http.StatusOK, meWithCookie(t, restarted, cookie).StatusCode,
 		"an OIDC session survives an API restart")
 }

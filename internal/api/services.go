@@ -74,7 +74,7 @@ type checkResultView struct {
 // tile, merged from the in-memory Gatus snapshot. It never proxies to Gatus, so
 // it cannot 5xx on Gatus being down (A9) — those tiles just resolve to UNKNOWN.
 func (s *server) handleListServices(w http.ResponseWriter, r *http.Request) {
-	u, ok := s.currentUser(r)
+	u, ok := s.currentUser(w, r)
 	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
@@ -320,7 +320,7 @@ func (s *server) handleDeleteService(w http.ResponseWriter, r *http.Request) {
 // handleStatus exposes the raw cached Gatus snapshot for the frontend's
 // staleness display (A4). Keys are Gatus endpoint keys, never the Gatus URL (A11).
 func (s *server) handleStatus(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.currentUser(r); !ok {
+	if _, ok := s.currentUser(w, r); !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -344,7 +344,7 @@ func (s *server) handleStatus(w http.ResponseWriter, r *http.Request) {
 // Session-gated like GET /api/status; not admin-only, because any viewer can
 // see the stale panel and the action is read-only against Gatus.
 func (s *server) handleStatusRefresh(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.currentUser(r); !ok {
+	if _, ok := s.currentUser(w, r); !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}

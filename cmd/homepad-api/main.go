@@ -73,10 +73,20 @@ func main() {
 		log.Printf("warning: unrecognized HOMEPAD_REGISTRATION=%q; failing closed (self-registration disabled)", rawReg)
 	}
 
+	// Sessions persist in Postgres (migration 0017), so a restart or deploy no
+	// longer signs anyone out. The sweeper deletes expired rows hourly; main
+	// waits for it to stop before the deferred store.Close.
+	sessions := session.NewPgStore(store.Pool())
+	sweeperDone := make(chan struct{})
+	go func() {
+		defer close(sweeperDone)
+		session.RunSweeper(ctx, sessions, session.SweepInterval, log.Printf)
+	}()
+
 	h := api.New(api.Deps{
 		Store:        store,
 		Poller:       poller,
-		Sessions:     session.NewManager(),
+		Sessions:     sessions,
 		Registration: regMode,
 		OIDC:         oidc.ConfigFromEnv(),
 	})
@@ -93,6 +103,8 @@ func main() {
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)
 	}
+	// ErrServerClosed only follows ctx cancellation, which also stops the sweeper.
+	<-sweeperDone
 	log.Println("homepad-api stopped")
 }
 

@@ -11,7 +11,7 @@ import (
 // handleAddFavorite marks a service as a favorite for the current user (A5).
 // Idempotent — re-marking returns 204. Unknown service id returns 404.
 func (s *server) handleAddFavorite(w http.ResponseWriter, r *http.Request) {
-	u, ok := s.currentUser(r)
+	u, ok := s.currentUser(w, r)
 	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
@@ -30,7 +30,7 @@ func (s *server) handleAddFavorite(w http.ResponseWriter, r *http.Request) {
 
 // handleRemoveFavorite unmarks a favorite for the current user (A5). Idempotent.
 func (s *server) handleRemoveFavorite(w http.ResponseWriter, r *http.Request) {
-	u, ok := s.currentUser(r)
+	u, ok := s.currentUser(w, r)
 	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
@@ -47,7 +47,7 @@ func (s *server) handleRemoveFavorite(w http.ResponseWriter, r *http.Request) {
 // order. An id that names no service returns 404; the order then persists into
 // GET /api/services for that user across sessions.
 func (s *server) handleUpdateLayout(w http.ResponseWriter, r *http.Request) {
-	u, ok := s.currentUser(r)
+	u, ok := s.currentUser(w, r)
 	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return

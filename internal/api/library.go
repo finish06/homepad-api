@@ -41,7 +41,7 @@ func offerView(la storage.LibraryApp, added bool) libraryOfferView {
 // the handler can just return. 403 (not 404) is the contract for these shared,
 // admin-scoped routes — distinct from the per-user 404 of Invariant 2.
 func (s *server) requireAdmin(w http.ResponseWriter, r *http.Request) (storage.User, bool) {
-	u, ok := s.currentUser(r)
+	u, ok := s.currentUser(w, r)
 	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return storage.User{}, false
@@ -56,7 +56,7 @@ func (s *server) requireAdmin(w http.ResponseWriter, r *http.Request) (storage.U
 // handleListLibrary serves the full App Library to any authenticated user, in
 // sort_index order, each offer tagged with the caller's `added` hint (A9).
 func (s *server) handleListLibrary(w http.ResponseWriter, r *http.Request) {
-	u, ok := s.currentUser(r)
+	u, ok := s.currentUser(w, r)
 	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return

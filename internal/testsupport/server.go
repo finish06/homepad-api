@@ -46,7 +46,7 @@ func NewOIDCServer(t *testing.T, cfg oidc.Config) (*httptest.Server, *storage.St
 	h := api.New(api.Deps{
 		Store:        store,
 		Poller:       poller,
-		Sessions:     session.NewManager(),
+		Sessions:     session.NewPgStore(store.Pool()),
 		Registration: api.RegistrationOpen,
 		OIDC:         cfg,
 	})
@@ -127,14 +127,23 @@ func newServer(t *testing.T, gatusURL string) *httptest.Server {
 	// AC A1's login test signs in as alice without registering first, so seed her.
 	seedUser(t, ctx, store, "alice@example.com", "correct horse battery staple", "user")
 
-	sessions := session.NewManager()
-	sessions.Bind("admin-session", admin)
-	sessions.Bind("non-admin-session", user)
-	sessions.Bind("any-user", user)
-	sessions.Bind("real-once-impl-exists", user)
-	// A5 favorites test signs the same user in twice to prove persistence.
-	sessions.Bind("session-one", user)
-	sessions.Bind("session-two", user)
+	// Fixture sessions live in Postgres, exactly like production sign-ins, so
+	// every integration test exercises the persistent store (AC-010). Only
+	// sha256 of each fixed token is stored.
+	sessions := session.NewPgStore(store.Pool())
+	for token, owner := range map[string]string{
+		"admin-session":         admin,
+		"non-admin-session":     user,
+		"any-user":              user,
+		"real-once-impl-exists": user,
+		// A5 favorites test signs the same user in twice to prove persistence.
+		"session-one": user,
+		"session-two": user,
+	} {
+		if err := sessions.Bind(ctx, token, owner, session.AdultLifetime); err != nil {
+			t.Fatalf("seed session %s: %v", token, err)
+		}
+	}
 
 	// v9 — services are per-user now. Seed each test user their OWN two
 	// monitored entries so /api/services is non-empty for whichever session a
@@ -181,7 +190,7 @@ func truncate(t *testing.T, ctx context.Context, dsn string) {
 	}
 	defer conn.Close(ctx)
 	if _, err := conn.Exec(ctx,
-		`TRUNCATE system_settings, user_collapsed_categories, user_layout, favorites, service_icons, library_apps, services, categories, users RESTART IDENTITY CASCADE`); err != nil {
+		`TRUNCATE sessions, system_settings, user_collapsed_categories, user_layout, favorites, service_icons, library_apps, services, categories, users RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 }

@@ -37,7 +37,7 @@ func validVariant(v string) bool { return v == "light" || v == "dark" }
 // rest of /api/* — the <img> carries the same-site session cookie. 404 when the
 // variant has no upload; honors If-None-Match → 304 (spec A10).
 func (s *server) handleGetIcon(w http.ResponseWriter, r *http.Request) {
-	u, ok := s.currentUser(r)
+	u, ok := s.currentUser(w, r)
 	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
