@@ -264,9 +264,10 @@ type pendingEntry struct {
 	expires  time.Time
 }
 
-// Pending is an in-memory store of in-flight logins keyed by state. It mirrors
-// the in-memory session.Manager design: v1 runs a single replica, so a restart
-// simply invalidates logins that were mid-redirect, which is acceptable.
+// Pending is an in-memory store of in-flight logins keyed by state. Unlike
+// sessions (persisted in Postgres) these live only minutes, and a single
+// replica serves them, so a restart simply invalidates logins that were
+// mid-redirect, which is acceptable.
 type Pending struct {
 	mu  sync.Mutex
 	m   map[string]pendingEntry
