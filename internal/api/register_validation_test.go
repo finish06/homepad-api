@@ -51,7 +51,7 @@ func TestRegisterInputValidation(t *testing.T) {
 
 			h := api.New(api.Deps{
 				Store:        store,
-				Sessions:     session.NewManager(),
+				Sessions:     session.NewMemoryStore(),
 				Registration: api.RegistrationOpen,
 			})
 			srv := httptest.NewServer(h)

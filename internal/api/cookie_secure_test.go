@@ -20,7 +20,8 @@ import (
 // TestSessionCookieSecure locks issue #14: the session cookie's Secure attribute
 // is gated by COOKIE_SECURE and defaults to ON. Unset or "true" -> Secure set;
 // "false" -> Secure absent (for the plain-HTTP nip.io staging setup). HttpOnly
-// and SameSite=Lax must stay set either way. Both login and logout are checked.
+// and SameSite=Lax must stay set either way. Login, the sliding-expiry refresh
+// and logout are all checked.
 func TestSessionCookieSecure(t *testing.T) {
 	dsn := dbguard.RequireTestDatabase(t)
 
@@ -64,7 +65,10 @@ func TestSessionCookieSecure(t *testing.T) {
 				t.Fatalf("seed user: %v", err)
 			}
 
-			h := api.New(api.Deps{Store: store, Sessions: session.NewManager()})
+			clk := newTestClock()
+			sessions := session.NewMemoryStore()
+			sessions.Clock = clk.Now
+			h := api.New(api.Deps{Store: store, Sessions: sessions})
 			srv := httptest.NewServer(h)
 			defer srv.Close()
 
@@ -76,6 +80,27 @@ func TestSessionCookieSecure(t *testing.T) {
 			}
 			loginResp.Body.Close()
 			assertSessionCookie(t, "login", loginResp.Cookies(), tc.wantSecure)
+
+			// A slide re-issues the cookie (AC-010); it must carry the same
+			// flags as the login cookie.
+			var token string
+			for _, c := range loginResp.Cookies() {
+				if c.Name == "homepad_session" {
+					token = c.Value
+				}
+			}
+			clk.Advance(session.TouchInterval)
+			meReq, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/me", nil)
+			meReq.AddCookie(&http.Cookie{Name: "homepad_session", Value: token})
+			meResp, err := http.DefaultClient.Do(meReq)
+			if err != nil {
+				t.Fatalf("GET /api/me: %v", err)
+			}
+			meResp.Body.Close()
+			if meResp.StatusCode != http.StatusOK {
+				t.Fatalf("GET /api/me after a minute = %d, want 200", meResp.StatusCode)
+			}
+			assertSessionCookie(t, "refresh", meResp.Cookies(), tc.wantSecure)
 
 			// Logout sets the cleared cookie and must mirror the same flags.
 			logoutResp, err := http.Post(srv.URL+"/api/logout", "application/json", nil)

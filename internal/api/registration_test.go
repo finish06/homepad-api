@@ -68,7 +68,7 @@ func TestRegistrationFailsClosed(t *testing.T) {
 			mode, _ := api.ParseRegistrationMode(tc.raw)
 			h := api.New(api.Deps{
 				Store:        store,
-				Sessions:     session.NewManager(),
+				Sessions:     session.NewMemoryStore(),
 				Registration: mode,
 			})
 			srv := httptest.NewServer(h)
