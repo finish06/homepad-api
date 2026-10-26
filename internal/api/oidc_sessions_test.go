@@ -16,7 +16,7 @@ import (
 // hashed session as a local login — a Postgres row keyed by sha256(token), a
 // cookie with the adult Max-Age — and it survives an API restart.
 func TestOIDCLoginCreatesPersistentSession(t *testing.T) {
-	idp := newMockIdP(t, "persist@calebdunn.tech", []string{"everyone"})
+	idp := newMockIdP(t, "persist@example.com", []string{"everyone"})
 	homepad, store := testsupport.NewOIDCServer(t, idp.config("homepad-admins"))
 
 	cookie := runOIDCLogin(t, homepad, idp)
@@ -25,7 +25,7 @@ func TestOIDCLoginCreatesPersistentSession(t *testing.T) {
 	assert.Equal(t, http.SameSiteLaxMode, cookie.SameSite)
 
 	ctx := context.Background()
-	u, err := store.UserByEmail(ctx, "persist@calebdunn.tech")
+	u, err := store.UserByEmail(ctx, "persist@example.com")
 	require.NoError(t, err)
 	sum := sha256.Sum256([]byte(cookie.Value))
 	var n int
