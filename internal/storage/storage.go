@@ -166,6 +166,10 @@ func (s *Store) Migrate(ctx context.Context) error {
 
 func (s *Store) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
 
+// Pool exposes the connection pool so the session store (internal/session)
+// shares it rather than opening a second one.
+func (s *Store) Pool() *pgxpool.Pool { return s.pool }
+
 func (s *Store) Close() error {
 	if s.pool != nil {
 		s.pool.Close()

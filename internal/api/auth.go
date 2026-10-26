@@ -3,12 +3,14 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"net/mail"
 	"strings"
 
 	"golang.org/x/crypto/bcrypt"
 
+	"gitea.kube.calebdunn.tech/code/homepad-api/internal/session"
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/storage"
 )
 
@@ -99,25 +101,22 @@ func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := s.sessions.Create(u.ID)
-	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+	if !s.startSession(w, r, u, s.cookieSecure) {
 		return
 	}
-	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookie,
-		Value:    token,
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   s.cookieSecure,
-		SameSite: http.SameSiteLaxMode,
-	})
 	writeJSON(w, http.StatusOK, newUserView(u))
 }
 
+// handleLogout deletes the session row and clears the cookie. The cookie is
+// cleared even if the delete fails, but the failure is reported as a 500 so it
+// is not mistaken for a completed sign-out.
 func (s *server) handleLogout(w http.ResponseWriter, r *http.Request) {
+	status := http.StatusNoContent
 	if ck, err := r.Cookie(sessionCookie); err == nil {
-		s.sessions.Destroy(ck.Value)
+		if err := s.sessions.Destroy(r.Context(), ck.Value); err != nil {
+			log.Printf("logout: destroy session: %v", err)
+			status = http.StatusInternalServerError
+		}
 	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookie,
@@ -128,11 +127,11 @@ func (s *server) handleLogout(w http.ResponseWriter, r *http.Request) {
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   -1,
 	})
-	w.WriteHeader(http.StatusNoContent)
+	w.WriteHeader(status)
 }
 
 func (s *server) handleMe(w http.ResponseWriter, r *http.Request) {
-	u, ok := s.currentUser(r)
+	u, ok := s.currentUser(w, r)
 	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
@@ -148,7 +147,7 @@ func (s *server) handleMe(w http.ResponseWriter, r *http.Request) {
 // leaving the stored value unchanged. It writes only the current user's row —
 // there is no path to another user's.
 func (s *server) handlePatchMe(w http.ResponseWriter, r *http.Request) {
-	u, ok := s.currentUser(r)
+	u, ok := s.currentUser(w, r)
 	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
@@ -223,18 +222,36 @@ func validThemePref(v string) bool {
 	return v == "system" || v == "light" || v == "dark"
 }
 
-func (s *server) currentUser(r *http.Request) (storage.User, bool) {
+// currentUser resolves the request's session cookie to its user, or false when
+// there is no live session. It also slides the session: at most once per
+// session.TouchInterval it extends the expiry by the role's lifetime and
+// re-issues the cookie with a fresh Max-Age (AC-010). A failed slide is logged
+// and does not fail the request — the session is still valid.
+func (s *server) currentUser(w http.ResponseWriter, r *http.Request) (storage.User, bool) {
 	ck, err := r.Cookie(sessionCookie)
 	if err != nil {
 		return storage.User{}, false
 	}
-	userID, ok := s.sessions.UserID(ck.Value)
-	if !ok {
+	ctx := r.Context()
+	sess, err := s.sessions.Lookup(ctx, ck.Value)
+	if err != nil {
+		if !errors.Is(err, session.ErrNotFound) {
+			log.Printf("session: lookup: %v", err)
+		}
 		return storage.User{}, false
 	}
-	u, err := s.store.UserByID(r.Context(), userID)
+	u, err := s.store.UserByID(ctx, sess.UserID)
 	if err != nil {
 		return storage.User{}, false
+	}
+	if sess.TouchDue {
+		lifetime := session.Lifetime(u.Role)
+		slid, err := s.sessions.Touch(ctx, ck.Value, lifetime)
+		if err != nil {
+			log.Printf("session: slide: %v", err)
+		} else if slid {
+			http.SetCookie(w, newSessionCookie(ck.Value, lifetime, s.cookieSecure))
+		}
 	}
 	return u, true
 }

@@ -38,7 +38,7 @@ func newCategoryView(c storage.Category) categoryView {
 // (SPEC-245-224). Session-gated like the rest of the catalog read; any logged-in
 // user reads the same admin-managed set (#245 — no longer per-user).
 func (s *server) handleListCategories(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.currentUser(r); !ok {
+	if _, ok := s.currentUser(w, r); !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}

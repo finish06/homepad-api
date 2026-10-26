@@ -36,10 +36,16 @@ stubs remain. `go test ./...` runs 26 tests green; `go vet ./...` clean.
 
 ## What it does
 
-- **Auth** — local register / login / logout (bcrypt, in-memory sessions) **and**
+- **Auth** — local register / login / logout (bcrypt, persistent sessions) **and**
   PocketID OIDC (Authorization Code + PKCE, ID-token verified on stdlib crypto,
   account-link by email, admin role from the OIDC group). OIDC is fully additive
   and only active when `OIDC_ENABLED=true`.
+- **Sessions** — stored in Postgres (migration `0017`), so a restart or deploy
+  does not sign anyone out. Only `sha256(token)` is stored, never the token. The
+  `homepad_session` cookie is HttpOnly, SameSite=Lax, `Max-Age` 30 days, and
+  sliding: the first request a minute or more after the last write extends the
+  expiry and re-issues the cookie (so polling writes at most once a minute per
+  session). Logout deletes the row; expired rows are swept hourly.
 - **Catalog** — shared service list; order-aware `GET /api/services` merges each
   user's saved layout. Admin-only create / edit / delete (non-admin → 403).
 - **Per-user state** — favorites and personal sort order, persisted in Postgres.
@@ -90,7 +96,7 @@ cmd/homepad-api/        entry point (opens Store, migrates, starts Poller)
 internal/api/           HTTP router + handlers (+ integration tests)
 internal/oidc/          PocketID OIDC: discovery, PKCE, ID-token verify, JWKS
 internal/gatus/         Gatus client + status poller
-internal/session/       in-memory session manager (v1)
+internal/session/       session store: Postgres (production) + in-memory (tests)
 internal/storage/       Postgres access + migrations
 internal/testsupport/   test harness (httptest server, Gatus + IdP stubs)
 migrations/             SQL migrations
