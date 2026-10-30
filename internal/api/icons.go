@@ -49,29 +49,21 @@ func (s *server) handleGetIcon(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// A kid reads icons only for its allowed services; any other id is the
-	// same 404 as a missing icon (AC-006). The allowed service lives in the
-	// shared catalog, so a kid's read resolves against the catalog owner.
-	// Adults keep their existing owner-scoped read unchanged.
-	if !s.serviceVisible(w, r, u, r.PathValue("id"), "no icon for that variant") {
+	// same 404 as a missing icon (AC-006). Every catalog service, and so every
+	// uploaded icon, belongs to the shared catalog owner, so every caller's
+	// read (adult or kid) resolves against the owner, not the caller (#84).
+	const notFound = "no icon for that variant"
+	if !s.serviceVisible(w, r, u, r.PathValue("id"), notFound) {
 		return
 	}
-	scope := u.ID
-	if !storage.IsAdultRole(u.Role) {
-		owner, err := s.store.SharedCatalogOwnerID(r.Context())
-		if errors.Is(err, storage.ErrNotFound) {
-			http.Error(w, "no icon for that variant", http.StatusNotFound)
-			return
-		}
-		if err != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
-		}
-		scope = owner
+	owner, ok := s.catalogOwner(w, r, notFound)
+	if !ok {
+		return
 	}
 
-	ic, err := s.store.GetIcon(r.Context(), r.PathValue("id"), scope, variant)
+	ic, err := s.store.GetIcon(r.Context(), r.PathValue("id"), owner, variant)
 	if errors.Is(err, storage.ErrNotFound) {
-		http.Error(w, "no icon for that variant", http.StatusNotFound)
+		http.Error(w, notFound, http.StatusNotFound)
 		return
 	}
 	if err != nil {
@@ -89,6 +81,22 @@ func (s *server) handleGetIcon(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "image/png")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(ic.Bytes)
+}
+
+// catalogOwner resolves the shared catalog owner, whose rows every account
+// reads. With no admin yet there is no catalog, so it writes a 404 with
+// notFoundMsg; on a failed lookup it writes a 500. Either way it returns false.
+func (s *server) catalogOwner(w http.ResponseWriter, r *http.Request, notFoundMsg string) (string, bool) {
+	owner, err := s.store.SharedCatalogOwnerID(r.Context())
+	if errors.Is(err, storage.ErrNotFound) {
+		http.Error(w, notFoundMsg, http.StatusNotFound)
+		return "", false
+	}
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return "", false
+	}
+	return owner, true
 }
 
 // handlePutIcon stores (creates or replaces) a PNG variant on a shared catalog
