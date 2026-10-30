@@ -10,13 +10,13 @@ import (
 	"image/png"
 	"io"
 	"net/http"
-	"os"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"gitea.kube.calebdunn.tech/code/homepad-api/internal/dbguard"
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/testsupport"
 )
 
@@ -272,8 +272,7 @@ func TestListExposesIconFlagsNotBytes(t *testing.T) {
 // to the test Postgres — the authoritative check for the cascade AC.
 func countIconRows(t *testing.T, serviceID string) int {
 	t.Helper()
-	dsn := os.Getenv("DATABASE_URL")
-	require.NotEmpty(t, dsn)
+	dsn := dbguard.RequireTestDatabase(t)
 	ctx := context.Background()
 	conn, err := pgx.Connect(ctx, dsn)
 	require.NoError(t, err)

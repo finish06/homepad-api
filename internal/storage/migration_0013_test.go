@@ -2,7 +2,6 @@ package storage_test
 
 import (
 	"context"
-	"os"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -18,10 +17,7 @@ import (
 // constraint, run Migrate, check the remap table, run Migrate AGAIN, check the
 // spans were not remapped a second time.
 func TestMigration0013_RemapsAndIsIdempotent(t *testing.T) {
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		t.Skip("DATABASE_URL not set — skipping integration test (needs Postgres)")
-	}
+	dsn := requireDatabaseURL(t)
 	ctx := context.Background()
 	store, err := storage.Open(ctx, dsn)
 	require.NoError(t, err)

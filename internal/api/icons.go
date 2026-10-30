@@ -37,7 +37,7 @@ func validVariant(v string) bool { return v == "light" || v == "dark" }
 // rest of /api/* — the <img> carries the same-site session cookie. 404 when the
 // variant has no upload; honors If-None-Match → 304 (spec A10).
 func (s *server) handleGetIcon(w http.ResponseWriter, r *http.Request) {
-	u, ok := s.currentUser(r)
+	u, ok := s.currentUser(w, r)
 	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
@@ -48,7 +48,28 @@ func (s *server) handleGetIcon(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ic, err := s.store.GetIcon(r.Context(), r.PathValue("id"), u.ID, variant)
+	// A kid reads icons only for its allowed services; any other id is the
+	// same 404 as a missing icon (AC-006). The allowed service lives in the
+	// shared catalog, so a kid's read resolves against the catalog owner.
+	// Adults keep their existing owner-scoped read unchanged.
+	if !s.serviceVisible(w, r, u, r.PathValue("id"), "no icon for that variant") {
+		return
+	}
+	scope := u.ID
+	if !storage.IsAdultRole(u.Role) {
+		owner, err := s.store.SharedCatalogOwnerID(r.Context())
+		if errors.Is(err, storage.ErrNotFound) {
+			http.Error(w, "no icon for that variant", http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		scope = owner
+	}
+
+	ic, err := s.store.GetIcon(r.Context(), r.PathValue("id"), scope, variant)
 	if errors.Is(err, storage.ErrNotFound) {
 		http.Error(w, "no icon for that variant", http.StatusNotFound)
 		return

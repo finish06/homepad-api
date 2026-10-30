@@ -3,12 +3,8 @@ package testsupport
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
-	"os"
-	"strings"
 	"testing"
 	"time"
 
@@ -16,6 +12,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/api"
+	"gitea.kube.calebdunn.tech/code/homepad-api/internal/dbguard"
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/gatus"
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/oidc"
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/session"
@@ -30,12 +27,8 @@ import (
 func NewOIDCServer(t *testing.T, cfg oidc.Config) (*httptest.Server, *storage.Store) {
 	t.Helper()
 
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		t.Skip("DATABASE_URL not set — skipping integration test (needs Postgres)")
-	}
 	// AC1 — guard BEFORE anything destructive (Migrate + TRUNCATE below).
-	guardDestructive(t, dsn)
+	dsn := dbguard.RequireTestDatabase(t)
 
 	ctx := context.Background()
 	store, err := storage.Open(ctx, dsn)
@@ -53,7 +46,7 @@ func NewOIDCServer(t *testing.T, cfg oidc.Config) (*httptest.Server, *storage.St
 	h := api.New(api.Deps{
 		Store:        store,
 		Poller:       poller,
-		Sessions:     session.NewManager(),
+		Sessions:     session.NewPgStore(store.Pool()),
 		Registration: api.RegistrationOpen,
 		OIDC:         cfg,
 	})
@@ -71,7 +64,61 @@ func NewOIDCServer(t *testing.T, cfg oidc.Config) (*httptest.Server, *storage.St
 func NewServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	// Gatus points at a black hole, so every keyed service resolves UNKNOWN (A9).
+	return newServer(t, "http://127.0.0.1:1").Server
+}
+
+// Env is the NewServer fixture with its store and session store exposed, for
+// tests that seed state no HTTP route can create directly (kid accounts and
+// their allow-lists before the admin API exists, raw DB assertions). The
+// fixture users and fixed-token sessions are exactly those of NewServer.
+type Env struct {
+	*httptest.Server
+	Store    *storage.Store
+	Sessions *session.PgStore
+	DSN      string
+	// AdminID is the first admin — the shared-catalog owner. UserID is the
+	// plain user behind "non-admin-session".
+	AdminID string
+	UserID  string
+}
+
+// NewEnv is NewServer, returning the whole fixture.
+func NewEnv(t *testing.T) *Env {
+	t.Helper()
 	return newServer(t, "http://127.0.0.1:1")
+}
+
+// NewEnvWithGatus is NewServerWithGatus, returning the whole fixture.
+func NewEnvWithGatus(t *testing.T, endpoints map[string][]GatusResult) *Env {
+	t.Helper()
+	return newServer(t, gatusStub(t, endpoints))
+}
+
+// SeedService adds a service to the shared catalog (owned by the first admin)
+// and returns its id.
+func (e *Env) SeedService(t *testing.T, slug, name, gatusKey string) string {
+	t.Helper()
+	return seedService(t, context.Background(), e.Store, e.AdminID, slug, name, gatusKey)
+}
+
+// SeedKid creates a kid account named name whose allow-list is allowed, and
+// signs it in with a fixed-token kid session. It returns the kid's id and the
+// session token.
+func (e *Env) SeedKid(t *testing.T, name string, allowed ...string) (id, token string) {
+	t.Helper()
+	ctx := context.Background()
+	kid, err := e.Store.CreateKid(ctx, name, "blue")
+	if err != nil {
+		t.Fatalf("seed kid %s: %v", name, err)
+	}
+	if err := e.Store.SetKidServices(ctx, kid.ID, allowed); err != nil {
+		t.Fatalf("seed kid %s allow-list: %v", name, err)
+	}
+	token = "kid-session-" + kid.ID
+	if err := e.Sessions.Bind(ctx, token, kid.ID, session.KidLifetime); err != nil {
+		t.Fatalf("seed kid %s session: %v", name, err)
+	}
+	return kid.ID, token
 }
 
 // GatusResult is one check in a stubbed Gatus history, oldest-first. A zero
@@ -85,6 +132,13 @@ type GatusResult struct {
 // results per endpoint key, for tests that need real statuses / durations
 // (responseTimeMs, status refresh). Returns the stub's URL for reference.
 func NewServerWithGatus(t *testing.T, endpoints map[string][]GatusResult) (*httptest.Server, string) {
+	t.Helper()
+	url := gatusStub(t, endpoints)
+	return newServer(t, url).Server, url
+}
+
+// gatusStub serves the given results per endpoint key as a Gatus statuses API.
+func gatusStub(t *testing.T, endpoints map[string][]GatusResult) string {
 	t.Helper()
 	base := time.Date(2026, 9, 13, 1, 0, 0, 0, time.UTC)
 	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -108,18 +162,14 @@ func NewServerWithGatus(t *testing.T, endpoints map[string][]GatusResult) (*http
 		_ = json.NewEncoder(w).Encode(payload)
 	}))
 	t.Cleanup(stub.Close)
-	return newServer(t, stub.URL), stub.URL
+	return stub.URL
 }
 
-func newServer(t *testing.T, gatusURL string) *httptest.Server {
+func newServer(t *testing.T, gatusURL string) *Env {
 	t.Helper()
 
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		t.Skip("DATABASE_URL not set — skipping integration test (needs Postgres)")
-	}
 	// AC1 — guard BEFORE anything destructive (Migrate + TRUNCATE below).
-	guardDestructive(t, dsn)
+	dsn := dbguard.RequireTestDatabase(t)
 
 	ctx := context.Background()
 	store, err := storage.Open(ctx, dsn)
@@ -138,22 +188,31 @@ func newServer(t *testing.T, gatusURL string) *httptest.Server {
 	// AC A1's login test signs in as alice without registering first, so seed her.
 	seedUser(t, ctx, store, "alice@example.com", "correct horse battery staple", "user")
 
-	sessions := session.NewManager()
-	sessions.Bind("admin-session", admin)
-	sessions.Bind("non-admin-session", user)
-	sessions.Bind("any-user", user)
-	sessions.Bind("real-once-impl-exists", user)
-	// A5 favorites test signs the same user in twice to prove persistence.
-	sessions.Bind("session-one", user)
-	sessions.Bind("session-two", user)
+	// Fixture sessions live in Postgres, exactly like production sign-ins, so
+	// every integration test exercises the persistent store (AC-010). Only
+	// sha256 of each fixed token is stored.
+	sessions := session.NewPgStore(store.Pool())
+	for token, owner := range map[string]string{
+		"admin-session":         admin,
+		"non-admin-session":     user,
+		"any-user":              user,
+		"real-once-impl-exists": user,
+		// A5 favorites test signs the same user in twice to prove persistence.
+		"session-one": user,
+		"session-two": user,
+	} {
+		if err := sessions.Bind(ctx, token, owner, session.AdultLifetime); err != nil {
+			t.Fatalf("seed session %s: %v", token, err)
+		}
+	}
 
 	// v9 — services are per-user now. Seed each test user their OWN two
 	// monitored entries so /api/services is non-empty for whichever session a
 	// test signs in as. Gatus points at a black hole below, so all resolve
 	// UNKNOWN (A9).
 	for _, owner := range []string{admin, user} {
-		seedService(t, ctx, store, owner, "gitea", "Gitea", "core_gitea")
-		seedService(t, ctx, store, owner, "grafana", "Grafana", "core_grafana")
+		_ = seedService(t, ctx, store, owner, "gitea", "Gitea", "core_gitea")
+		_ = seedService(t, ctx, store, owner, "grafana", "Grafana", "core_grafana")
 	}
 
 	poller := gatus.NewPoller(gatus.NewClient(gatusURL), time.Hour)
@@ -166,51 +225,19 @@ func newServer(t *testing.T, gatusURL string) *httptest.Server {
 	})
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
-	return srv
+	return &Env{Server: srv, Store: store, Sessions: sessions, DSN: dsn, AdminID: admin, UserID: user}
 }
 
 // guardDestructive fails the test immediately unless dsn points at a throwaway
 // test database. It uses t.Fatalf, never t.Skip (AC2): a silent skip would let a
 // broken QA run look green, which is exactly how the prod truncation went
-// unnoticed until the data was already gone.
+// unnoticed until the data was already gone. The guard logic itself lives in
+// internal/dbguard so testsupport, storage and api share one copy (#72).
 func guardDestructive(t *testing.T, dsn string) {
 	t.Helper()
-	if err := checkTestDatabase(dsn); err != nil {
+	if err := dbguard.CheckTestDatabase(dsn); err != nil {
 		t.Fatalf("%v", err)
 	}
-}
-
-// checkTestDatabase is the single safety guard protecting every destructive
-// operation in this package (Migrate and TRUNCATE). It returns a non-nil error
-// unless DATABASE_URL points at a throwaway test database:
-//
-//   - AC2: the database name must end in "_test" or equal "homepad_test".
-//   - AC3: the DSN host must NOT be the production CNPG cluster
-//     (homepad-pg-rw.homepad[.svc…]). This check is independent of the name, so
-//     a prod database mislabelled "homepad_test" is still refused.
-//
-// On 2026-09-13 this harness, pointed at the prod DSN from homepad-api#59,
-// truncated Caleb's entire Homepad catalog. This guard exists so that can never
-// recur. There is deliberately NO override env var: a copy-pasteable bypass is
-// exactly how the accident happened (AC4).
-func checkTestDatabase(dsn string) error {
-	u, err := url.Parse(dsn)
-	if err != nil {
-		return fmt.Errorf("refusing destructive test setup: cannot parse DATABASE_URL: %w", err)
-	}
-	host := u.Hostname()
-	// AC3 — hard-refuse the production cluster host, regardless of db name.
-	for _, prod := range []string{"homepad-pg-rw.homepad.svc", "homepad-pg-rw.homepad"} {
-		if strings.Contains(host, prod) {
-			return fmt.Errorf("refusing destructive test setup: DSN host %q is the production cluster (matches %q); this harness truncates every table and must never run against prod", host, prod)
-		}
-	}
-	// AC2 — only a throwaway test database may be migrated/truncated.
-	name := strings.TrimPrefix(u.Path, "/")
-	if name == "homepad_test" || strings.HasSuffix(name, "_test") {
-		return nil
-	}
-	return fmt.Errorf("refusing destructive test setup: database %q is not a test database (name must end in \"_test\" or equal \"homepad_test\") — this harness truncates every table", name)
 }
 
 func truncate(t *testing.T, ctx context.Context, dsn string) {
@@ -224,7 +251,7 @@ func truncate(t *testing.T, ctx context.Context, dsn string) {
 	}
 	defer conn.Close(ctx)
 	if _, err := conn.Exec(ctx,
-		`TRUNCATE system_settings, user_collapsed_categories, user_layout, favorites, service_icons, library_apps, services, categories, users RESTART IDENTITY CASCADE`); err != nil {
+		`TRUNCATE kid_allowed_services, sessions, system_settings, user_collapsed_categories, user_layout, favorites, service_icons, library_apps, services, categories, users RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 }
@@ -242,15 +269,17 @@ func seedUser(t *testing.T, ctx context.Context, store *storage.Store, email, pa
 	return u.ID
 }
 
-func seedService(t *testing.T, ctx context.Context, store *storage.Store, userID, slug, name, gatusKey string) {
+func seedService(t *testing.T, ctx context.Context, store *storage.Store, userID, slug, name, gatusKey string) string {
 	t.Helper()
-	if _, err := store.CreateService(ctx, userID, storage.Service{
+	sv, err := store.CreateService(ctx, userID, storage.Service{
 		Slug:     slug,
 		Name:     name,
 		URL:      "https://" + slug + ".example.com",
 		Icon:     slug,
 		GatusKey: gatusKey,
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatalf("seed service %s: %v", slug, err)
 	}
+	return sv.ID
 }

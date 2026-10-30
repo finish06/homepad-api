@@ -100,18 +100,12 @@ func (s *server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := s.sessions.Create(u.ID)
-	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+	// Secure stays off here, exactly as before persistent sessions: this
+	// callback has never honoured COOKIE_SECURE. Aligning it with local login
+	// is a separate, deliberate change.
+	if !s.startSession(w, r, u, false) {
 		return
 	}
-	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookie,
-		Value:    token,
-		Path:     "/",
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-	})
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 
@@ -121,6 +115,11 @@ func (s *server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 func (s *server) resolveOIDCUser(ctx context.Context, claims oidc.Claims) (storage.User, error) {
 	u, err := s.store.UserByEmail(ctx, claims.Email)
 	if err == nil {
+		// UserByEmail never returns a kid; refuse one anyway rather than sign
+		// a kid in through an identity provider.
+		if !storage.IsAdultRole(u.Role) {
+			return storage.User{}, errors.New("oidc: identity resolves to a non-adult account")
+		}
 		return u, nil
 	}
 	if !errors.Is(err, storage.ErrNotFound) {

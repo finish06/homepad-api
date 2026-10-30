@@ -2,12 +2,12 @@ package storage_test
 
 import (
 	"context"
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"gitea.kube.calebdunn.tech/code/homepad-api/internal/dbguard"
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/storage"
 )
 
@@ -17,13 +17,14 @@ import (
 // They are skipped locally when DATABASE_URL is unset so the suite stays runnable
 // without docker — CI must set the env var or these ACs are not actually verified.
 
+// requireDatabaseURL is the single accessor every storage integration test uses
+// to obtain DATABASE_URL. It delegates to dbguard, which skips when the var is
+// unset and FATALS (never skips, #67 AC2) on a non-test or prod-host DSN BEFORE
+// any Open/Migrate/TRUNCATE/DROP — closing the gap #72 that left this package's
+// destructive tests able to wipe prod the way 2026-09-13 did.
 func requireDatabaseURL(t *testing.T) string {
 	t.Helper()
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		t.Skip("DATABASE_URL not set — skipping Postgres-backed test (AC A10 unverified in this run)")
-	}
-	return dsn
+	return dbguard.RequireTestDatabase(t)
 }
 
 func TestStorageBootsWithDatabaseURL(t *testing.T) {

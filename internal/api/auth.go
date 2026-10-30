@@ -3,14 +3,20 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"io"
+	"log"
 	"net/http"
 	"net/mail"
 	"strings"
 
 	"golang.org/x/crypto/bcrypt"
 
+	"gitea.kube.calebdunn.tech/code/homepad-api/internal/session"
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/storage"
 )
+
+// maxPatchMeBody caps the PATCH /api/me body; it carries four small fields.
+const maxPatchMeBody = 64 * 1024
 
 // minPasswordLen is the minimum length enforced at registration (#12). Kept
 // modest so it gates obviously-weak inputs without dictating a full policy.
@@ -38,10 +44,17 @@ type userView struct {
 	// Name is the user's display name (v7 §6.2); empty when unset, in which
 	// case the frontend derives the avatar from the email's first letter.
 	Name string `json:"name"`
+	// DisplayName is the same display name under the name SPEC-kid-accounts
+	// §7 gives it; a kid always has one. Additive for adults.
+	DisplayName string `json:"displayName"`
+	// AvatarColor is the account's avatar color (an accent id), "" when unset.
+	AvatarColor string `json:"avatarColor"`
 }
 
 func newUserView(u storage.User) userView {
-	return userView{ID: u.ID, Email: u.Email, Role: u.Role, ThemePref: u.ThemePref, DensityPref: u.DensityPref, ShowHealthBar: u.ShowHealthBar, ShowUptimeDisplay: u.ShowUptimeDisplay, Name: u.DisplayName}
+	return userView{ID: u.ID, Email: u.Email, Role: u.Role, ThemePref: u.ThemePref, DensityPref: u.DensityPref,
+		ShowHealthBar: u.ShowHealthBar, ShowUptimeDisplay: u.ShowUptimeDisplay, Name: u.DisplayName,
+		DisplayName: u.DisplayName, AvatarColor: u.AvatarColor}
 }
 
 func (s *server) handleRegister(w http.ResponseWriter, r *http.Request) {
@@ -94,30 +107,31 @@ func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	u, err := s.store.UserByEmail(r.Context(), c.Email)
-	if err != nil || bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(c.Password)) != nil {
+	// Only adults sign in here. UserByEmail cannot return a kid (kids have no
+	// email or password), and the role check keeps it that way even if that
+	// ever changed: a kid is signed in only by an admin, on the device.
+	if err != nil || !storage.IsAdultRole(u.Role) || u.PasswordHash == "" ||
+		bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(c.Password)) != nil {
 		http.Error(w, "invalid email or password", http.StatusUnauthorized)
 		return
 	}
 
-	token, err := s.sessions.Create(u.ID)
-	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+	if !s.startSession(w, r, u, s.cookieSecure) {
 		return
 	}
-	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookie,
-		Value:    token,
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   s.cookieSecure,
-		SameSite: http.SameSiteLaxMode,
-	})
 	writeJSON(w, http.StatusOK, newUserView(u))
 }
 
+// handleLogout deletes the session row and clears the cookie. The cookie is
+// cleared even if the delete fails, but the failure is reported as a 500 so it
+// is not mistaken for a completed sign-out.
 func (s *server) handleLogout(w http.ResponseWriter, r *http.Request) {
+	status := http.StatusNoContent
 	if ck, err := r.Cookie(sessionCookie); err == nil {
-		s.sessions.Destroy(ck.Value)
+		if err := s.sessions.Destroy(r.Context(), ck.Value); err != nil {
+			log.Printf("logout: destroy session: %v", err)
+			status = http.StatusInternalServerError
+		}
 	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookie,
@@ -128,11 +142,11 @@ func (s *server) handleLogout(w http.ResponseWriter, r *http.Request) {
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   -1,
 	})
-	w.WriteHeader(http.StatusNoContent)
+	w.WriteHeader(status)
 }
 
 func (s *server) handleMe(w http.ResponseWriter, r *http.Request) {
-	u, ok := s.currentUser(r)
+	u, ok := s.currentUser(w, r)
 	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
@@ -148,21 +162,42 @@ func (s *server) handleMe(w http.ResponseWriter, r *http.Request) {
 // leaving the stored value unchanged. It writes only the current user's row —
 // there is no path to another user's.
 func (s *server) handlePatchMe(w http.ResponseWriter, r *http.Request) {
-	u, ok := s.currentUser(r)
+	u, ok := s.currentUser(w, r)
 	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
+	raw, err := io.ReadAll(io.LimitReader(r.Body, maxPatchMeBody))
+	if err != nil {
+		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		return
+	}
 	var body struct {
 		ThemePref         *string `json:"themePref"`
 		DensityPref       *string `json:"densityPref"`
 		ShowHealthBar     *bool   `json:"showHealthBar"`
 		ShowUptimeDisplay *bool   `json:"showUptimeDisplay"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	if err := json.Unmarshal(raw, &body); err != nil {
 		http.Error(w, "invalid JSON body", http.StatusBadRequest)
 		return
+	}
+	// D3 / AC-007 — a kid may change its theme and nothing else. Any other key
+	// (known or not), alone or next to themePref, is refused before anything
+	// is written, so a mixed request cannot half-apply.
+	if !storage.IsAdultRole(u.Role) {
+		var keys map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &keys); err != nil {
+			http.Error(w, "invalid JSON body", http.StatusBadRequest)
+			return
+		}
+		for k := range keys {
+			if k != "themePref" {
+				http.Error(w, "kid accounts can only change themePref", http.StatusForbidden)
+				return
+			}
+		}
 	}
 	if body.ThemePref == nil && body.DensityPref == nil && body.ShowHealthBar == nil &&
 		body.ShowUptimeDisplay == nil {
@@ -223,18 +258,36 @@ func validThemePref(v string) bool {
 	return v == "system" || v == "light" || v == "dark"
 }
 
-func (s *server) currentUser(r *http.Request) (storage.User, bool) {
+// currentUser resolves the request's session cookie to its user, or false when
+// there is no live session. It also slides the session: at most once per
+// session.TouchInterval it extends the expiry by the role's lifetime and
+// re-issues the cookie with a fresh Max-Age (AC-010). A failed slide is logged
+// and does not fail the request — the session is still valid.
+func (s *server) currentUser(w http.ResponseWriter, r *http.Request) (storage.User, bool) {
 	ck, err := r.Cookie(sessionCookie)
 	if err != nil {
 		return storage.User{}, false
 	}
-	userID, ok := s.sessions.UserID(ck.Value)
-	if !ok {
+	ctx := r.Context()
+	sess, err := s.sessions.Lookup(ctx, ck.Value)
+	if err != nil {
+		if !errors.Is(err, session.ErrNotFound) {
+			log.Printf("session: lookup: %v", err)
+		}
 		return storage.User{}, false
 	}
-	u, err := s.store.UserByID(r.Context(), userID)
+	u, err := s.store.UserByID(ctx, sess.UserID)
 	if err != nil {
 		return storage.User{}, false
+	}
+	if sess.TouchDue {
+		lifetime := session.Lifetime(u.Role)
+		slid, err := s.sessions.Touch(ctx, ck.Value, lifetime)
+		if err != nil {
+			log.Printf("session: slide: %v", err)
+		} else if slid {
+			http.SetCookie(w, newSessionCookie(ck.Value, lifetime, s.cookieSecure))
+		}
 	}
 	return u, true
 }

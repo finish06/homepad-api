@@ -2,3 +2,6 @@
 /.env
 /coverage.out
 *.test
+
+# `go build ./cmd/...` from the repo root drops the binary here.
+/homepad-api

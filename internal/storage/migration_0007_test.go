@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io/fs"
 	"net/url"
-	"os"
 	"sort"
 	"strings"
 	"testing"
@@ -40,10 +39,9 @@ func withDBName(t *testing.T, dsn, name string) string {
 // DATABASE_URL is unset (mirrors the other integration tests).
 func freshDB(t *testing.T, name string) (context.Context, *pgx.Conn) {
 	t.Helper()
-	base := os.Getenv("DATABASE_URL")
-	if base == "" {
-		t.Skip("DATABASE_URL not set — skipping migration test (needs Postgres)")
-	}
+	// Guard the BASE DSN before we DROP/CREATE a scratch database off it (#72):
+	// a prod-host base must be refused here, not after we start issuing DDL.
+	base := requireDatabaseURL(t)
 	ctx := context.Background()
 
 	admin, err := pgx.Connect(ctx, base)

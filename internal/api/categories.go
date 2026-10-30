@@ -36,9 +36,12 @@ func newCategoryView(c storage.Category) categoryView {
 
 // handleListCategories serves the shared catalog categories in sort_index order
 // (SPEC-245-224). Session-gated like the rest of the catalog read; any logged-in
-// user reads the same admin-managed set (#245 — no longer per-user).
+// user reads the same admin-managed set (#245 — no longer per-user). A kid
+// reads only the categories holding at least one of its allowed services
+// (AC-005, OQ-2): an empty section is hidden, and so is its name.
 func (s *server) handleListCategories(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.currentUser(r); !ok {
+	u, ok := s.currentUser(w, r)
+	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -57,11 +60,41 @@ func (s *server) handleListCategories(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+	visibleCats, ok := s.visibleCategoryIDs(w, r, owner, u)
+	if !ok {
+		return
+	}
 	out := make([]categoryView, 0, len(cats))
 	for _, c := range cats {
-		out = append(out, newCategoryView(c))
+		if visibleCats == nil || visibleCats[c.ID] {
+			out = append(out, newCategoryView(c))
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"categories": out})
+}
+
+// visibleCategoryIDs returns nil (every category) for an adult, and for a kid
+// the ids of the categories that hold at least one of its allowed services. On
+// error it has written a 500.
+func (s *server) visibleCategoryIDs(w http.ResponseWriter, r *http.Request, owner string, u storage.User) (map[string]bool, bool) {
+	vis, ok := s.visibleServices(w, r, u)
+	if !ok {
+		return nil, false
+	}
+	if vis == nil {
+		return nil, true
+	}
+	svcs, ok := s.visibleCatalog(w, r, owner, u)
+	if !ok {
+		return nil, false
+	}
+	ids := map[string]bool{}
+	for _, sv := range svcs {
+		if sv.CategoryID != nil {
+			ids[*sv.CategoryID] = true
+		}
+	}
+	return ids, true
 }
 
 // handleCreateCategory adds a category to the App Grid (issue #224, SPEC-app-grid

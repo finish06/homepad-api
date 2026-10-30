@@ -9,11 +9,15 @@ import (
 )
 
 // handleAddFavorite marks a service as a favorite for the current user (A5).
-// Idempotent — re-marking returns 204. Unknown service id returns 404.
+// Idempotent — re-marking returns 204. Unknown service id returns 404, and so
+// does a service off a kid's allow-list (AC-006), with the same body.
 func (s *server) handleAddFavorite(w http.ResponseWriter, r *http.Request) {
-	u, ok := s.currentUser(r)
+	u, ok := s.currentUser(w, r)
 	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if !s.serviceVisible(w, r, u, r.PathValue("id"), "no such service") {
 		return
 	}
 	err := s.store.AddFavorite(r.Context(), u.ID, r.PathValue("id"))
@@ -28,11 +32,15 @@ func (s *server) handleAddFavorite(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// handleRemoveFavorite unmarks a favorite for the current user (A5). Idempotent.
+// handleRemoveFavorite unmarks a favorite for the current user (A5). Idempotent
+// for adults; for a kid, a service off its allow-list is 404 (AC-006).
 func (s *server) handleRemoveFavorite(w http.ResponseWriter, r *http.Request) {
-	u, ok := s.currentUser(r)
+	u, ok := s.currentUser(w, r)
 	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if !s.serviceVisible(w, r, u, r.PathValue("id"), "no such service") {
 		return
 	}
 	if err := s.store.RemoveFavorite(r.Context(), u.ID, r.PathValue("id")); err != nil {
@@ -47,7 +55,7 @@ func (s *server) handleRemoveFavorite(w http.ResponseWriter, r *http.Request) {
 // order. An id that names no service returns 404; the order then persists into
 // GET /api/services for that user across sessions.
 func (s *server) handleUpdateLayout(w http.ResponseWriter, r *http.Request) {
-	u, ok := s.currentUser(r)
+	u, ok := s.currentUser(w, r)
 	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return

@@ -2,7 +2,6 @@ package storage_test
 
 import (
 	"context"
-	"os"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -22,10 +21,7 @@ import (
 // its PRE-0016 form, migrate, assert the seed, then migrate AGAIN and assert the
 // user's own choice survived.
 func TestMigration0016_SeedsFromGlobalAndSeedsOnlyOnce(t *testing.T) {
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		t.Skip("DATABASE_URL not set — skipping integration test (needs Postgres)")
-	}
+	dsn := requireDatabaseURL(t)
 	ctx := context.Background()
 	store, err := storage.Open(ctx, dsn)
 	require.NoError(t, err)
@@ -85,10 +81,7 @@ func TestMigration0016_SeedsFromGlobalAndSeedsOnlyOnce(t *testing.T) {
 // would pass this on its own and prove nothing; with it OFF, only a CreateUser
 // that genuinely reads system_settings can succeed.
 func TestCreateUser_InheritsAdminDefaultWhenOff(t *testing.T) {
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		t.Skip("DATABASE_URL not set — skipping integration test (needs Postgres)")
-	}
+	dsn := requireDatabaseURL(t)
 	ctx := context.Background()
 	store, err := storage.Open(ctx, dsn)
 	require.NoError(t, err)

@@ -6,10 +6,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/api"
+	"gitea.kube.calebdunn.tech/code/homepad-api/internal/dbguard"
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/session"
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/storage"
 )
@@ -20,10 +20,7 @@ import (
 // Validation runs in decodeCredentials, ahead of the registration gate, so the
 // 400 cases short-circuit regardless of registration mode or user count.
 func TestRegisterInputValidation(t *testing.T) {
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		t.Skip("DATABASE_URL not set — skipping integration test (needs Postgres)")
-	}
+	dsn := dbguard.RequireTestDatabase(t)
 
 	ctx := context.Background()
 	store, err := storage.Open(ctx, dsn)
@@ -54,7 +51,7 @@ func TestRegisterInputValidation(t *testing.T) {
 
 			h := api.New(api.Deps{
 				Store:        store,
-				Sessions:     session.NewManager(),
+				Sessions:     session.NewMemoryStore(),
 				Registration: api.RegistrationOpen,
 			})
 			srv := httptest.NewServer(h)
