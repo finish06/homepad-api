@@ -17,8 +17,8 @@ import (
 // DEFAULT. SeedDemoIfNoUsers predates the column by two months and omitted it,
 // so the INSERT was a not-null violation:
 //
-//   ERROR: null value in column "show_uptime_display" of relation "users"
-//   violates not-null constraint (SQLSTATE 23502)
+//	ERROR: null value in column "show_uptime_display" of relation "users"
+//	violates not-null constraint (SQLSTATE 23502)
 //
 // The seeder is log.Fatalf on error, and the demo's Postgres is an ephemeral
 // sidecar wiped on every scale-to-zero — so it boots at migration zero every

@@ -2,11 +2,19 @@
   <img src="https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white" alt="Go 1.25">
   <img src="https://img.shields.io/badge/Postgres-backed-336791?logo=postgresql&logoColor=white" alt="Postgres">
   <img src="https://img.shields.io/badge/auth-local%20%2B%20PocketID%20OIDC-6366f1" alt="Local + PocketID OIDC">
-  <img src="https://img.shields.io/badge/tests-26%20Go%20passing-brightgreen" alt="26 Go tests passing">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License">
 </p>
 
 # homepad-api
+
+> **Looking for Homepad itself?** This is its backend. To run Homepad, use the
+> [quickstart](https://github.com/finish06/homepad#quickstart): one compose file
+> with published images for amd64 and arm64, and no build. Website:
+> [gethomepad.dev](https://gethomepad.dev) · live demo:
+> [demo.gethomepad.dev](https://demo.gethomepad.dev).
+>
+> Image: `ghcr.io/finish06/homepad-api:<version>`, tagged with the same version
+> as `ghcr.io/finish06/homepad`.
 
 Backend (Go) for **homepad** — the self-hosted homelab launcher with live uptime
 badges. Serves the shared service catalog, per-user favorites & ordering, admin
@@ -28,10 +36,26 @@ stubs remain. `go test ./...` runs 26 tests green; `go vet ./...` clean.
 
 ## What it does
 
-- **Auth** — local register / login / logout (bcrypt, in-memory sessions) **and**
+- **Auth** — local register / login / logout (bcrypt, persistent sessions) **and**
   PocketID OIDC (Authorization Code + PKCE, ID-token verified on stdlib crypto,
   account-link by email, admin role from the OIDC group). OIDC is fully additive
   and only active when `OIDC_ENABLED=true`.
+- **Sessions** — stored in Postgres (migration `0017`), so a restart or deploy
+  does not sign anyone out. Only `sha256(token)` is stored, never the token. The
+  `homepad_session` cookie is HttpOnly, SameSite=Lax, `Max-Age` 30 days, and
+  sliding: the first request a minute or more after the last write extends the
+  expiry and re-issues the cookie (so polling writes at most once a minute per
+  session). Logout deletes the row; expired rows are swept hourly. Kid sessions
+  last 180 days, also sliding.
+- **Kid accounts** — a third role, `kid` (migration `0018`), created by an
+  admin with just a name: no email, no password, and no way to sign in except
+  an admin's "sign in this device as …". A kid sees only the services on its
+  allow-list; every catalog read is filtered server-side through
+  `storage.VisibleServiceIDs`, and every catalog, library, layout, icon-write,
+  admin and settings write is 403. A kid may change its favorites (allowed
+  apps only) and its theme. `internal/api/routes_test.go` classifies every
+  route and probes each one with a kid session; a new route that is not
+  classified there fails the build.
 - **Catalog** — shared service list; order-aware `GET /api/services` merges each
   user's saved layout. Admin-only create / edit / delete (non-admin → 403).
 - **Per-user state** — favorites and personal sort order, persisted in Postgres.
@@ -51,6 +75,25 @@ PUT    /api/layout              PATCH  /api/services/{id}         (admin)
                                 DELETE /api/services/{id}         (admin)
 GET    /api/status              POST   /api/status/refresh        (re-poll Gatus now)
 ```
+
+Admin Accounts API (all admin-only; `{id}` is always a kid — an adult's id is 404):
+
+```
+GET    /api/admin/accounts                      [{id, name, role, lastSeenAt, …}]
+POST   /api/admin/kids                          {name, avatarColor?} → 201
+PATCH  /api/admin/kids/{id}                     {name?, avatarColor?}
+DELETE /api/admin/kids/{id}                     → 204 (sessions, favorites, allow-list go too)
+GET    /api/admin/kids/{id}/services            {serviceIds: [...]}
+PUT    /api/admin/kids/{id}/services            {serviceIds: [...]} whole-set replace → 204
+GET    /api/admin/kids/{id}/sessions            [{id, userAgent, createdAt, lastSeenAt}]
+DELETE /api/admin/kids/{id}/sessions/{sid}      → 204 (the device's next request is 401)
+POST   /api/admin/kids/{id}/sign-in-here        ends the admin's session, sets the kid's → 204
+```
+
+Kid names are 1–40 characters and unique among kids (case-insensitive);
+`avatarColor` is one of the frontend accent ids (`blue`, `teal`, `green`,
+`yellow`, `orange`, `red`, `pink`, `purple`; default `blue`). A session `id` is
+an opaque handle, never the token or its hash.
 
 `GET /api/services` carries `responseTimeMs` per service — the latest Gatus
 check's response time — **only when there is one**; the key is omitted (never
@@ -82,7 +125,7 @@ cmd/homepad-api/        entry point (opens Store, migrates, starts Poller)
 internal/api/           HTTP router + handlers (+ integration tests)
 internal/oidc/          PocketID OIDC: discovery, PKCE, ID-token verify, JWKS
 internal/gatus/         Gatus client + status poller
-internal/session/       in-memory session manager (v1)
+internal/session/       session store: Postgres (production) + in-memory (tests)
 internal/storage/       Postgres access + migrations
 internal/testsupport/   test harness (httptest server, Gatus + IdP stubs)
 migrations/             SQL migrations

@@ -74,7 +74,7 @@ type checkResultView struct {
 // tile, merged from the in-memory Gatus snapshot. It never proxies to Gatus, so
 // it cannot 5xx on Gatus being down (A9) — those tiles just resolve to UNKNOWN.
 func (s *server) handleListServices(w http.ResponseWriter, r *http.Request) {
-	u, ok := s.currentUser(r)
+	u, ok := s.currentUser(w, r)
 	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
@@ -90,10 +90,11 @@ func (s *server) handleListServices(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	// Shared set (owner's rows) decorated with the caller's own layout order.
-	svcs, err := s.store.ListServices(r.Context(), owner, u.ID)
-	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+	// Shared set (owner's rows) decorated with the caller's own layout order,
+	// filtered to what the caller may see (everything for an adult; the
+	// allow-list for a kid — AC-003).
+	svcs, ok := s.visibleCatalog(w, r, owner, u)
+	if !ok {
 		return
 	}
 	favs, err := s.store.FavoriteIDs(r.Context(), u.ID)
@@ -319,17 +320,73 @@ func (s *server) handleDeleteService(w http.ResponseWriter, r *http.Request) {
 
 // handleStatus exposes the raw cached Gatus snapshot for the frontend's
 // staleness display (A4). Keys are Gatus endpoint keys, never the Gatus URL (A11).
+//
+// For a kid it carries only the Gatus keys of the kid's allowed services
+// (AC-004), so the key list cannot reveal what else is monitored.
 func (s *server) handleStatus(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.currentUser(r); !ok {
+	u, ok := s.currentUser(w, r)
+	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
+	}
+	vis, ok := s.visibleServices(w, r, u)
+	if !ok {
+		return
+	}
+	var allowedKeys map[string]bool // nil = every key (adults)
+	if vis != nil {
+		allowedKeys = map[string]bool{}
+		owner, err := s.store.SharedCatalogOwnerID(r.Context())
+		if err != nil && !errors.Is(err, storage.ErrNotFound) {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		if err == nil {
+			svcs, err := s.store.ListServices(r.Context(), owner, u.ID)
+			if err != nil {
+				http.Error(w, "internal error", http.StatusInternalServerError)
+				return
+			}
+			for _, sv := range svcs {
+				if sv.GatusKey != "" && vis.Allows(sv.ID) {
+					allowedKeys[sv.GatusKey] = true
+				}
+			}
+		}
 	}
 	snap := s.poller.Snapshot()
 	statuses := make(map[string]string, len(snap.Statuses))
 	for key, st := range snap.Statuses {
-		statuses[key] = st.Status
+		if allowedKeys == nil || allowedKeys[key] {
+			statuses[key] = st.Status
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"as_of": snap.AsOf, "statuses": statuses})
+}
+
+// visibleCatalog lists the shared catalog (owner's rows, in u's layout order)
+// filtered through VisibleServiceIDs — the one way a handler reads the catalog
+// for a possibly-kid caller. On error it has written a 500.
+func (s *server) visibleCatalog(w http.ResponseWriter, r *http.Request, owner string, u storage.User) ([]storage.Service, bool) {
+	vis, ok := s.visibleServices(w, r, u)
+	if !ok {
+		return nil, false
+	}
+	svcs, err := s.store.ListServices(r.Context(), owner, u.ID)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return nil, false
+	}
+	if vis == nil {
+		return svcs, true
+	}
+	out := make([]storage.Service, 0, len(svcs))
+	for _, sv := range svcs {
+		if vis.Allows(sv.ID) {
+			out = append(out, sv)
+		}
+	}
+	return out, true
 }
 
 // handleStatusRefresh re-polls Gatus on demand (SPEC-v24 §12.3, OQ-5) so a
@@ -344,7 +401,7 @@ func (s *server) handleStatus(w http.ResponseWriter, r *http.Request) {
 // Session-gated like GET /api/status; not admin-only, because any viewer can
 // see the stale panel and the action is read-only against Gatus.
 func (s *server) handleStatusRefresh(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.currentUser(r); !ok {
+	if _, ok := s.currentUser(w, r); !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}

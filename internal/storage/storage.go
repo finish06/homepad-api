@@ -74,8 +74,29 @@ type User struct {
 	ShowUptimeDisplay bool
 	// DisplayName is the optional human name (v7). The column is nullable; it
 	// is scanned via COALESCE so an unset name reads as "" (the frontend then
-	// falls back to the email's first letter for the avatar).
+	// falls back to the email's first letter for the avatar). A kid always has
+	// one (the users_kid_credentials_check constraint).
 	DisplayName string
+	// AvatarColor is the account's avatar color, one of the frontend accent ids
+	// (SPEC-kid-accounts §2.3); "" when unset, as it is for every adult today.
+	AvatarColor string
+}
+
+// userColumns is the one SELECT list every User read uses. email and
+// password_hash are NULL for a kid (migration 0018), so they are COALESCEd to
+// "": a kid reads back with no email and an empty hash, which bcrypt can never
+// match.
+const userColumns = `id, COALESCE(email, ''), COALESCE(password_hash, ''), role, theme_pref, density_pref,
+	show_health_bar, show_uptime_display, COALESCE(display_name, ''), COALESCE(avatar_color, '')`
+
+// scanUser scans a row selected with userColumns first; extra receives any
+// columns selected after them.
+func scanUser(row pgx.Row, extra ...any) (User, error) {
+	var u User
+	dest := append([]any{&u.ID, &u.Email, &u.PasswordHash, &u.Role, &u.ThemePref, &u.DensityPref,
+		&u.ShowHealthBar, &u.ShowUptimeDisplay, &u.DisplayName, &u.AvatarColor}, extra...)
+	err := row.Scan(dest...)
+	return u, err
 }
 
 // Service is a catalog entry. GatusKey is empty when the service is unmonitored.
@@ -166,6 +187,10 @@ func (s *Store) Migrate(ctx context.Context) error {
 
 func (s *Store) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
 
+// Pool exposes the connection pool so the session store (internal/session)
+// shares it rather than opening a second one.
+func (s *Store) Pool() *pgxpool.Pool { return s.pool }
+
 func (s *Store) Close() error {
 	if s.pool != nil {
 		s.pool.Close()
@@ -173,21 +198,26 @@ func (s *Store) Close() error {
 	return nil
 }
 
+// CountUsers counts the ADULT accounts (admin and user). It backs the
+// first-account-becomes-admin rule, which kids must not influence: a kid is
+// never "the first account", and its existence must not close the bootstrap.
 func (s *Store) CountUsers(ctx context.Context) (int, error) {
 	var n int
-	err := s.pool.QueryRow(ctx, `SELECT count(*) FROM users`).Scan(&n)
+	err := s.pool.QueryRow(ctx, `SELECT count(*) FROM users WHERE role <> 'kid'`).Scan(&n)
 	return n, err
 }
 
+// CreateUser creates an adult account (register, OIDC). It cannot create a
+// kid: a kid has no email, and the users_kid_credentials_check constraint
+// refuses a kid row that carries one. Kids are created by CreateKid only.
 func (s *Store) CreateUser(ctx context.Context, email, passwordHash, role string) (User, error) {
-	var u User
-	err := s.pool.QueryRow(ctx,
+	u, err := scanUser(s.pool.QueryRow(ctx,
 		`INSERT INTO users (email, password_hash, role, show_uptime_display)
 		 VALUES ($1, $2, $3,
 		         COALESCE((SELECT show_uptime_display FROM system_settings WHERE id = 1), TRUE))
-		 RETURNING id, email, password_hash, role, theme_pref, density_pref, show_health_bar, show_uptime_display, COALESCE(display_name, '')`,
+		 RETURNING `+userColumns,
 		email, passwordHash, role,
-	).Scan(&u.ID, &u.Email, &u.PasswordHash, &u.Role, &u.ThemePref, &u.DensityPref, &u.ShowHealthBar, &u.ShowUptimeDisplay, &u.DisplayName)
+	))
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 		return User{}, ErrEmailTaken
@@ -198,8 +228,11 @@ func (s *Store) CreateUser(ctx context.Context, email, passwordHash, role string
 	return u, nil
 }
 
+// UserByEmail resolves an adult by email (login, OIDC). It never returns a
+// kid: kids have no email, and the role filter makes that explicit rather than
+// a consequence of the schema.
 func (s *Store) UserByEmail(ctx context.Context, email string) (User, error) {
-	return s.userBy(ctx, `WHERE email = $1`, email)
+	return s.userBy(ctx, `WHERE email = $1 AND role <> 'kid'`, email)
 }
 
 func (s *Store) UserByID(ctx context.Context, id string) (User, error) {
@@ -681,10 +714,7 @@ func (s *Store) SetLayout(ctx context.Context, userID string, orderedIDs []strin
 }
 
 func (s *Store) userBy(ctx context.Context, where string, arg any) (User, error) {
-	var u User
-	err := s.pool.QueryRow(ctx,
-		`SELECT id, email, password_hash, role, theme_pref, density_pref, show_health_bar, show_uptime_display, COALESCE(display_name, '') FROM users `+where, arg,
-	).Scan(&u.ID, &u.Email, &u.PasswordHash, &u.Role, &u.ThemePref, &u.DensityPref, &u.ShowHealthBar, &u.ShowUptimeDisplay, &u.DisplayName)
+	u, err := scanUser(s.pool.QueryRow(ctx, `SELECT `+userColumns+` FROM users `+where, arg))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, ErrNotFound
 	}

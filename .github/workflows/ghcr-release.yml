@@ -1,0 +1,83 @@
+# Publish the homepad-api image to GitHub Container Registry, on GITHUB runners.
+#
+# The canonical repo is on Gitea (Code/homepad-api). A Gitea push mirror
+# (sync_on_commit) pushes every ref to github.com/finish06/homepad-api, so a
+# merge to main or a tag push lands here within moments and triggers this build.
+# This is the same arrangement as homepad's own ghcr-release.yml.
+#
+# WHY IT EXISTS: it is the public image that people outside the homelab install.
+# Homepad's quickstart compose pulls ghcr.io/finish06/homepad-api:<version>
+# next to ghcr.io/finish06/homepad:<version>. The homelab does NOT pull from
+# here; it deploys from the internal registry. A zero-consumer audit in the
+# cluster is therefore expected and is not a reason to retire this.
+#
+# Test-dedup contract: NO tests here. Anything on main already passed the PR
+# gates and the QA pool on Gitea; this is purely a publish target.
+#
+# Tags:
+#   push to main   → :<7-char sha>, :latest   (same scheme as homepad's web image)
+#   push tag vX.Y.Z → :X.Y.Z, :X.Y, :X, :<7-char sha>
+# Platforms: linux/amd64 and linux/arm64 (Raspberry Pi and other ARM homelab
+# hosts). arm64 is built under QEMU, so it is slower; the Dockerfile is unchanged.
+name: ghcr publish
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*.*.*']
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false # never abandon a half-pushed release
+
+jobs:
+  build-push:
+    name: Build & push to ghcr.io
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/finish06/homepad-api
+          flavor: latest=false
+          tags: |
+            type=sha,format=short,prefix=
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+          labels: |
+            org.opencontainers.image.title=homepad-api
+            org.opencontainers.image.description=Go API for Homepad, the self-hosted household dashboard
+            org.opencontainers.image.url=https://gethomepad.dev
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

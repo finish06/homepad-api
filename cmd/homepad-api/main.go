@@ -52,6 +52,11 @@ func main() {
 	// categories and services — never system_settings — so it cannot affect the
 	// threshold read that follows; putting it first keeps "the DB is populated"
 	// true for everything after it.
+	//
+	// Sessions (migration 0017) live in this same database, so the demo's
+	// reset-on-idle (a fresh, empty sidecar on every cold start) signs every
+	// visitor out with it, and no session can outlive its user: sessions.user_id
+	// cascades. internal/api/demo_lifecycle_test.go pins both.
 	if seeded, err := store.SeedDemoIfNoUsers(ctx); err != nil {
 		log.Fatalf("seed demo: %v", err)
 	} else if seeded {
@@ -88,10 +93,20 @@ func main() {
 		log.Printf("warning: unrecognized HOMEPAD_REGISTRATION=%q; failing closed (self-registration disabled)", rawReg)
 	}
 
+	// Sessions persist in Postgres (migration 0017), so a restart or deploy no
+	// longer signs anyone out. The sweeper deletes expired rows hourly; main
+	// waits for it to stop before the deferred store.Close.
+	sessions := session.NewPgStore(store.Pool())
+	sweeperDone := make(chan struct{})
+	go func() {
+		defer close(sweeperDone)
+		session.RunSweeper(ctx, sessions, session.SweepInterval, log.Printf)
+	}()
+
 	h := api.New(api.Deps{
 		Store:        store,
 		Poller:       poller,
-		Sessions:     session.NewManager(),
+		Sessions:     sessions,
 		Registration: regMode,
 		OIDC:         oidc.ConfigFromEnv(),
 	})
@@ -108,6 +123,8 @@ func main() {
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)
 	}
+	// ErrServerClosed only follows ctx cancellation, which also stops the sweeper.
+	<-sweeperDone
 	log.Println("homepad-api stopped")
 }
 
