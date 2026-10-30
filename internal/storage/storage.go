@@ -558,9 +558,10 @@ func (s *Store) AllIconFlags(ctx context.Context) (map[string]IconFlags, error) 
 	return out, rows.Err()
 }
 
-// GetIcon returns the stored PNG bytes and ETag for one of userID's OWN
-// service's variants (v9 — owner-scoped). Returns ErrNotFound when the service
-// is not the caller's (404, D2) or the variant has no upload.
+// GetIcon returns the stored PNG bytes and ETag for a variant of a service
+// owned by userID. The read route passes the shared catalog owner here, not
+// the requesting user (#84). Returns ErrNotFound when userID does not own the
+// service (404, D2) or the variant has no upload.
 func (s *Store) GetIcon(ctx context.Context, serviceID, userID, variant string) (Icon, error) {
 	if err := s.serviceOwnedBy(ctx, serviceID, userID); err != nil {
 		return Icon{}, err
