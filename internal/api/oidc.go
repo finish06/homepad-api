@@ -115,6 +115,11 @@ func (s *server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 func (s *server) resolveOIDCUser(ctx context.Context, claims oidc.Claims) (storage.User, error) {
 	u, err := s.store.UserByEmail(ctx, claims.Email)
 	if err == nil {
+		// UserByEmail never returns a kid; refuse one anyway rather than sign
+		// a kid in through an identity provider.
+		if !storage.IsAdultRole(u.Role) {
+			return storage.User{}, errors.New("oidc: identity resolves to a non-adult account")
+		}
 		return u, nil
 	}
 	if !errors.Is(err, storage.ErrNotFound) {

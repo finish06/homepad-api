@@ -2,7 +2,10 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
+
+	"gitea.kube.calebdunn.tech/code/homepad-api/internal/storage"
 )
 
 // handleGetCollapsedCategories returns the current user's collapsed category-id
@@ -18,6 +21,34 @@ func (s *server) handleGetCollapsedCategories(w http.ResponseWriter, r *http.Req
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
+	}
+	// A kid's set is filtered to the categories it can see, like
+	// GET /api/categories, so it can never name a hidden one.
+	vis, ok := s.visibleServices(w, r, u)
+	if !ok {
+		return
+	}
+	if vis != nil {
+		owner, err := s.store.SharedCatalogOwnerID(r.Context())
+		if errors.Is(err, storage.ErrNotFound) {
+			writeJSON(w, http.StatusOK, map[string]any{"collapsed": []string{}})
+			return
+		}
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		visibleCats, ok := s.visibleCategoryIDs(w, r, owner, u)
+		if !ok {
+			return
+		}
+		kept := make([]string, 0, len(ids))
+		for _, id := range ids {
+			if visibleCats[id] {
+				kept = append(kept, id)
+			}
+		}
+		ids = kept
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"collapsed": ids})
 }

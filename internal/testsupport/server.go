@@ -64,7 +64,61 @@ func NewOIDCServer(t *testing.T, cfg oidc.Config) (*httptest.Server, *storage.St
 func NewServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	// Gatus points at a black hole, so every keyed service resolves UNKNOWN (A9).
+	return newServer(t, "http://127.0.0.1:1").Server
+}
+
+// Env is the NewServer fixture with its store and session store exposed, for
+// tests that seed state no HTTP route can create directly (kid accounts and
+// their allow-lists before the admin API exists, raw DB assertions). The
+// fixture users and fixed-token sessions are exactly those of NewServer.
+type Env struct {
+	*httptest.Server
+	Store    *storage.Store
+	Sessions *session.PgStore
+	DSN      string
+	// AdminID is the first admin — the shared-catalog owner. UserID is the
+	// plain user behind "non-admin-session".
+	AdminID string
+	UserID  string
+}
+
+// NewEnv is NewServer, returning the whole fixture.
+func NewEnv(t *testing.T) *Env {
+	t.Helper()
 	return newServer(t, "http://127.0.0.1:1")
+}
+
+// NewEnvWithGatus is NewServerWithGatus, returning the whole fixture.
+func NewEnvWithGatus(t *testing.T, endpoints map[string][]GatusResult) *Env {
+	t.Helper()
+	return newServer(t, gatusStub(t, endpoints))
+}
+
+// SeedService adds a service to the shared catalog (owned by the first admin)
+// and returns its id.
+func (e *Env) SeedService(t *testing.T, slug, name, gatusKey string) string {
+	t.Helper()
+	return seedService(t, context.Background(), e.Store, e.AdminID, slug, name, gatusKey)
+}
+
+// SeedKid creates a kid account named name whose allow-list is allowed, and
+// signs it in with a fixed-token kid session. It returns the kid's id and the
+// session token.
+func (e *Env) SeedKid(t *testing.T, name string, allowed ...string) (id, token string) {
+	t.Helper()
+	ctx := context.Background()
+	kid, err := e.Store.CreateKid(ctx, name, "blue")
+	if err != nil {
+		t.Fatalf("seed kid %s: %v", name, err)
+	}
+	if err := e.Store.SetKidServices(ctx, kid.ID, allowed); err != nil {
+		t.Fatalf("seed kid %s allow-list: %v", name, err)
+	}
+	token = "kid-session-" + kid.ID
+	if err := e.Sessions.Bind(ctx, token, kid.ID, session.KidLifetime); err != nil {
+		t.Fatalf("seed kid %s session: %v", name, err)
+	}
+	return kid.ID, token
 }
 
 // GatusResult is one check in a stubbed Gatus history, oldest-first. A zero
@@ -78,6 +132,13 @@ type GatusResult struct {
 // results per endpoint key, for tests that need real statuses / durations
 // (responseTimeMs, status refresh). Returns the stub's URL for reference.
 func NewServerWithGatus(t *testing.T, endpoints map[string][]GatusResult) (*httptest.Server, string) {
+	t.Helper()
+	url := gatusStub(t, endpoints)
+	return newServer(t, url).Server, url
+}
+
+// gatusStub serves the given results per endpoint key as a Gatus statuses API.
+func gatusStub(t *testing.T, endpoints map[string][]GatusResult) string {
 	t.Helper()
 	base := time.Date(2026, 9, 13, 1, 0, 0, 0, time.UTC)
 	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -101,10 +162,10 @@ func NewServerWithGatus(t *testing.T, endpoints map[string][]GatusResult) (*http
 		_ = json.NewEncoder(w).Encode(payload)
 	}))
 	t.Cleanup(stub.Close)
-	return newServer(t, stub.URL), stub.URL
+	return stub.URL
 }
 
-func newServer(t *testing.T, gatusURL string) *httptest.Server {
+func newServer(t *testing.T, gatusURL string) *Env {
 	t.Helper()
 
 	// AC1 — guard BEFORE anything destructive (Migrate + TRUNCATE below).
@@ -150,8 +211,8 @@ func newServer(t *testing.T, gatusURL string) *httptest.Server {
 	// test signs in as. Gatus points at a black hole below, so all resolve
 	// UNKNOWN (A9).
 	for _, owner := range []string{admin, user} {
-		seedService(t, ctx, store, owner, "gitea", "Gitea", "core_gitea")
-		seedService(t, ctx, store, owner, "grafana", "Grafana", "core_grafana")
+		_ = seedService(t, ctx, store, owner, "gitea", "Gitea", "core_gitea")
+		_ = seedService(t, ctx, store, owner, "grafana", "Grafana", "core_grafana")
 	}
 
 	poller := gatus.NewPoller(gatus.NewClient(gatusURL), time.Hour)
@@ -164,7 +225,7 @@ func newServer(t *testing.T, gatusURL string) *httptest.Server {
 	})
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
-	return srv
+	return &Env{Server: srv, Store: store, Sessions: sessions, DSN: dsn, AdminID: admin, UserID: user}
 }
 
 // guardDestructive fails the test immediately unless dsn points at a throwaway
@@ -190,7 +251,7 @@ func truncate(t *testing.T, ctx context.Context, dsn string) {
 	}
 	defer conn.Close(ctx)
 	if _, err := conn.Exec(ctx,
-		`TRUNCATE sessions, system_settings, user_collapsed_categories, user_layout, favorites, service_icons, library_apps, services, categories, users RESTART IDENTITY CASCADE`); err != nil {
+		`TRUNCATE kid_allowed_services, sessions, system_settings, user_collapsed_categories, user_layout, favorites, service_icons, library_apps, services, categories, users RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 }
@@ -208,15 +269,17 @@ func seedUser(t *testing.T, ctx context.Context, store *storage.Store, email, pa
 	return u.ID
 }
 
-func seedService(t *testing.T, ctx context.Context, store *storage.Store, userID, slug, name, gatusKey string) {
+func seedService(t *testing.T, ctx context.Context, store *storage.Store, userID, slug, name, gatusKey string) string {
 	t.Helper()
-	if _, err := store.CreateService(ctx, userID, storage.Service{
+	sv, err := store.CreateService(ctx, userID, storage.Service{
 		Slug:     slug,
 		Name:     name,
 		URL:      "https://" + slug + ".example.com",
 		Icon:     slug,
 		GatusKey: gatusKey,
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatalf("seed service %s: %v", slug, err)
 	}
+	return sv.ID
 }

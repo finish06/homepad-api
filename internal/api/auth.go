@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"log"
 	"net/http"
 	"net/mail"
@@ -13,6 +14,9 @@ import (
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/session"
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/storage"
 )
+
+// maxPatchMeBody caps the PATCH /api/me body; it carries four small fields.
+const maxPatchMeBody = 64 * 1024
 
 // minPasswordLen is the minimum length enforced at registration (#12). Kept
 // modest so it gates obviously-weak inputs without dictating a full policy.
@@ -40,10 +44,17 @@ type userView struct {
 	// Name is the user's display name (v7 §6.2); empty when unset, in which
 	// case the frontend derives the avatar from the email's first letter.
 	Name string `json:"name"`
+	// DisplayName is the same display name under the name SPEC-kid-accounts
+	// §7 gives it; a kid always has one. Additive for adults.
+	DisplayName string `json:"displayName"`
+	// AvatarColor is the account's avatar color (an accent id), "" when unset.
+	AvatarColor string `json:"avatarColor"`
 }
 
 func newUserView(u storage.User) userView {
-	return userView{ID: u.ID, Email: u.Email, Role: u.Role, ThemePref: u.ThemePref, DensityPref: u.DensityPref, ShowHealthBar: u.ShowHealthBar, ShowUptimeDisplay: u.ShowUptimeDisplay, Name: u.DisplayName}
+	return userView{ID: u.ID, Email: u.Email, Role: u.Role, ThemePref: u.ThemePref, DensityPref: u.DensityPref,
+		ShowHealthBar: u.ShowHealthBar, ShowUptimeDisplay: u.ShowUptimeDisplay, Name: u.DisplayName,
+		DisplayName: u.DisplayName, AvatarColor: u.AvatarColor}
 }
 
 func (s *server) handleRegister(w http.ResponseWriter, r *http.Request) {
@@ -96,7 +107,11 @@ func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	u, err := s.store.UserByEmail(r.Context(), c.Email)
-	if err != nil || bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(c.Password)) != nil {
+	// Only adults sign in here. UserByEmail cannot return a kid (kids have no
+	// email or password), and the role check keeps it that way even if that
+	// ever changed: a kid is signed in only by an admin, on the device.
+	if err != nil || !storage.IsAdultRole(u.Role) || u.PasswordHash == "" ||
+		bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(c.Password)) != nil {
 		http.Error(w, "invalid email or password", http.StatusUnauthorized)
 		return
 	}
@@ -153,15 +168,36 @@ func (s *server) handlePatchMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	raw, err := io.ReadAll(io.LimitReader(r.Body, maxPatchMeBody))
+	if err != nil {
+		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		return
+	}
 	var body struct {
 		ThemePref         *string `json:"themePref"`
 		DensityPref       *string `json:"densityPref"`
 		ShowHealthBar     *bool   `json:"showHealthBar"`
 		ShowUptimeDisplay *bool   `json:"showUptimeDisplay"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	if err := json.Unmarshal(raw, &body); err != nil {
 		http.Error(w, "invalid JSON body", http.StatusBadRequest)
 		return
+	}
+	// D3 / AC-007 — a kid may change its theme and nothing else. Any other key
+	// (known or not), alone or next to themePref, is refused before anything
+	// is written, so a mixed request cannot half-apply.
+	if !storage.IsAdultRole(u.Role) {
+		var keys map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &keys); err != nil {
+			http.Error(w, "invalid JSON body", http.StatusBadRequest)
+			return
+		}
+		for k := range keys {
+			if k != "themePref" {
+				http.Error(w, "kid accounts can only change themePref", http.StatusForbidden)
+				return
+			}
+		}
 	}
 	if body.ThemePref == nil && body.DensityPref == nil && body.ShowHealthBar == nil &&
 		body.ShowUptimeDisplay == nil {

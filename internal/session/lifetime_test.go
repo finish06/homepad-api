@@ -12,13 +12,18 @@ import (
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/session"
 )
 
-// AC-010 — lifetimes are a function of role. Adults (admin, user) get 30 days.
-// Phase 2 adds the kid role (180 days) as one more case here.
+// AC-010 — lifetimes are a function of role. Adults (admin, user) get 30 days;
+// a kid gets 180 days (the family iPad stays signed in), both sliding.
 func TestLifetimeByRole(t *testing.T) {
 	const day = 24 * time.Hour
 	cases := map[string]time.Duration{
 		"admin": 30 * day,
 		"user":  30 * day,
+		"kid":   180 * day,
+		// Role matching is exact: a near-miss is unknown, so it gets the
+		// shorter lifetime rather than the kid one.
+		"Kid":  30 * day,
+		"kid ": 30 * day,
 		// An unknown role gets the SHORTER adult lifetime, never the longer one.
 		"":        30 * day,
 		"unknown": 30 * day,
@@ -27,6 +32,7 @@ func TestLifetimeByRole(t *testing.T) {
 		assert.Equal(t, want, session.Lifetime(role), "Lifetime(%q)", role)
 	}
 	assert.Equal(t, 30*day, session.AdultLifetime)
+	assert.Equal(t, 180*day, session.KidLifetime)
 	assert.Equal(t, time.Minute, session.TouchInterval)
 }
 

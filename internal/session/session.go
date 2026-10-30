@@ -27,6 +27,10 @@ const (
 	// AdultLifetime is the sliding lifetime of an admin or user session.
 	AdultLifetime = 30 * 24 * time.Hour
 
+	// KidLifetime is the sliding lifetime of a kid session: the family iPad
+	// stays signed in for months (SPEC-kid-accounts D1, AC-010).
+	KidLifetime = 180 * 24 * time.Hour
+
 	// TouchInterval throttles the slide: last_seen_at and expires_at are written
 	// at most once per interval per session, however often the client polls.
 	TouchInterval = time.Minute
@@ -39,10 +43,14 @@ const (
 	maxUserAgentLen = 512
 )
 
-// Lifetime returns the sliding session lifetime for a role. Every current role
-// (admin, user) is an adult; an unknown role also gets the adult lifetime — the
-// shorter one, never the longer. Phase 2 adds the kid role (180 days) here.
+// Lifetime returns the sliding session lifetime for a role: 180 days for a
+// kid, 30 for an adult (admin, user). The match is exact, and anything that is
+// not exactly "kid" — including an unknown role — gets the adult lifetime: the
+// shorter one, never the longer.
 func Lifetime(role string) time.Duration {
+	if role == "kid" {
+		return KidLifetime
+	}
 	return AdultLifetime
 }
 
