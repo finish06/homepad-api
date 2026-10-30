@@ -97,6 +97,17 @@ var expectedRouteClasses = map[string]string{
 	"POST /api/library/{id}/add":               "admin-only",
 	"PATCH /api/admin/settings":                "admin-only",
 	"GET /api/admin/env-config":                "admin-only",
+
+	// The admin Accounts API (SPEC-kid-accounts §7, plan TASK-305).
+	"GET /api/admin/accounts":                    "admin-only",
+	"POST /api/admin/kids":                       "admin-only",
+	"PATCH /api/admin/kids/{id}":                 "admin-only",
+	"DELETE /api/admin/kids/{id}":                "admin-only",
+	"GET /api/admin/kids/{id}/services":          "admin-only",
+	"PUT /api/admin/kids/{id}/services":          "admin-only",
+	"GET /api/admin/kids/{id}/sessions":          "admin-only",
+	"DELETE /api/admin/kids/{id}/sessions/{sid}": "admin-only",
+	"POST /api/admin/kids/{id}/sign-in-here":     "admin-only",
 }
 
 // allRoutes is the full registration: OIDC on (so its two routes register)

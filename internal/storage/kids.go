@@ -158,6 +158,39 @@ func (s *Store) DeleteKid(ctx context.Context, id string) error {
 	return nil
 }
 
+// Account is one row of the admin Accounts list (spec §7). AppCount is the
+// size of a kid's allow-list within the shared catalog (0 for adults).
+type Account struct {
+	User
+	AppCount int
+}
+
+// ListAccounts lists every account for the admin Accounts section: admins
+// first, then users, then kids, each oldest first.
+func (s *Store) ListAccounts(ctx context.Context) ([]Account, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT `+userColumns+`,
+		        (SELECT count(*) FROM kid_allowed_services k
+		           JOIN services sv ON sv.id = k.service_id
+		          WHERE k.user_id = users.id AND sv.user_id = `+sharedOwnerSQL+`)
+		   FROM users
+		  ORDER BY CASE role WHEN 'admin' THEN 0 WHEN 'user' THEN 1 ELSE 2 END, created_at, id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Account
+	for rows.Next() {
+		var a Account
+		a.User, err = scanUser(rows, &a.AppCount)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
 // sharedOwnerSQL is SharedCatalogOwnerID as a subquery.
 const sharedOwnerSQL = `(SELECT id FROM users WHERE role = 'admin' ORDER BY created_at, id LIMIT 1)`
 

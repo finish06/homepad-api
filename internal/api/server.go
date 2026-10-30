@@ -158,6 +158,17 @@ func (s *server) routes(d Deps) (http.Handler, []registeredRoute) {
 	// SPEC-v26 — read-only admin view of allowlisted runtime env vars.
 	rt.handle("GET /api/admin/env-config", classAdminOnly, s.handleAdminEnvConfig)
 
+	// SPEC-kid-accounts §7 — the admin Accounts API.
+	rt.handle("GET /api/admin/accounts", classAdminOnly, s.handleListAccounts)
+	rt.handle("POST /api/admin/kids", classAdminOnly, s.handleCreateKid)
+	rt.handle("PATCH /api/admin/kids/{id}", classAdminOnly, s.handleUpdateKid)
+	rt.handle("DELETE /api/admin/kids/{id}", classAdminOnly, s.handleDeleteKid)
+	rt.handle("GET /api/admin/kids/{id}/services", classAdminOnly, s.handleGetKidServices)
+	rt.handle("PUT /api/admin/kids/{id}/services", classAdminOnly, s.handleSetKidServices)
+	rt.handle("GET /api/admin/kids/{id}/sessions", classAdminOnly, s.handleListKidSessions)
+	rt.handle("DELETE /api/admin/kids/{id}/sessions/{sid}", classAdminOnly, s.handleRevokeKidSession)
+	rt.handle("POST /api/admin/kids/{id}/sign-in-here", classAdminOnly, s.handleSignInHere)
+
 	// OIDC config is always advertised so the web client can gate its
 	// "Log in with PocketID" button. The login/callback endpoints exist
 	// only when OIDC is enabled — otherwise they stay unregistered (404)
