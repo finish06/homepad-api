@@ -9,6 +9,7 @@ import (
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/oidc"
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/session"
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/storage"
+	"gitea.kube.calebdunn.tech/code/homepad-api/internal/transfer"
 )
 
 const sessionCookie = "homepad_session"
@@ -43,6 +44,9 @@ type server struct {
 	// inviteBucket is the one rate limit the public invite routes share
 	// (SPEC-household-basics §3.4). Per server, so per process.
 	inviteBucket *tokenBucket
+	// transferWrap, when set (tests only), wraps the Writer every restore and
+	// import apply writes through.
+	transferWrap func(transfer.Writer) transfer.Writer
 }
 
 func New(d Deps) http.Handler {

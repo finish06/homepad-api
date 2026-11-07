@@ -1,0 +1,18 @@
+---
+# For configuration options and examples, please see:
+# https://gethomepage.dev/configs/bookmarks
+
+- Developer:
+    - Github:
+        - abbr: GH
+          href: https://github.com/
+    - Docs:
+        - icon: si-readthedocs
+          href: https://docs.example.com
+          description: Team docs
+
+- Media:
+    - Reddit:
+        - abbr: RE
+          href: https://www.reddit.com/r/selfhosted/
+          description: Self-hosted news
