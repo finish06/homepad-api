@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"strings"
 
@@ -53,15 +54,40 @@ func (s *server) requireAdmin(w http.ResponseWriter, r *http.Request) (storage.U
 	return u, true
 }
 
+// requireCatalogAdmin is requireAdmin for a catalog write (classCatalogWrite):
+// it returns the shared catalog owner, whose rows the write must act on for
+// every admin, not just the first (SPEC-household-basics AC-023, #87). The
+// caller's own id is for the caller's own things only (favorites, layout,
+// preferences). The caller is an admin, so an owner always exists; a failed
+// lookup is a 500.
+func (s *server) requireCatalogAdmin(w http.ResponseWriter, r *http.Request) (owner string, ok bool) {
+	if _, ok := s.requireAdmin(w, r); !ok {
+		return "", false
+	}
+	owner, err := s.store.SharedCatalogOwnerID(r.Context())
+	if err != nil {
+		log.Printf("catalog: resolve owner: %v", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return "", false
+	}
+	return owner, true
+}
+
 // handleListLibrary serves the full App Library to any authenticated user, in
-// sort_index order, each offer tagged with the caller's `added` hint (A9).
+// sort_index order, each offer tagged with whether the shared catalog already
+// has a copy (A9; AC-024: the same hint for every caller).
 func (s *server) handleListLibrary(w http.ResponseWriter, r *http.Request) {
-	u, ok := s.currentUser(w, r)
-	if !ok {
+	if _, ok := s.currentUser(w, r); !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	offers, err := s.store.ListLibrary(r.Context(), u.ID)
+	// With no admin there is no catalog, so nothing reads "added" ("" owner).
+	owner, err := s.store.SharedCatalogOwnerID(r.Context())
+	if err != nil && !errors.Is(err, storage.ErrNotFound) {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	offers, err := s.store.ListLibrary(r.Context(), owner)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
@@ -177,7 +203,7 @@ func (s *server) handleSetLibraryOrder(w http.ResponseWriter, r *http.Request) {
 // 400; absent/null lands Uncategorized (D4). Unknown offer id → 404. Adding twice
 // is allowed and makes a second copy (D6).
 func (s *server) handleAddFromLibrary(w http.ResponseWriter, r *http.Request) {
-	u, ok := s.requireAdmin(w, r)
+	owner, ok := s.requireCatalogAdmin(w, r)
 	if !ok {
 		return
 	}
@@ -192,7 +218,7 @@ func (s *server) handleAddFromLibrary(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	sv, err := s.store.AddFromLibrary(r.Context(), u.ID, r.PathValue("id"), in.CategoryID)
+	sv, err := s.store.AddFromLibrary(r.Context(), owner, r.PathValue("id"), in.CategoryID)
 	if errors.Is(err, storage.ErrCategoryNotFound) {
 		http.Error(w, "no such category", http.StatusBadRequest)
 		return

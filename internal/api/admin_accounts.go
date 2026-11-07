@@ -181,7 +181,11 @@ func (s *server) handleCreateKid(w http.ResponseWriter, r *http.Request) {
 		}
 		color = *in.AvatarColor
 	}
-	kid, err := s.store.CreateKid(r.Context(), name, color)
+	kid, err := s.store.CreateKidWithLimit(r.Context(), name, color, s.maxAccounts)
+	if errors.Is(err, storage.ErrAccountLimit) {
+		s.refuseAtLimit(w, r)
+		return
+	}
 	if errors.Is(err, storage.ErrKidNameTaken) {
 		http.Error(w, "a kid with that name already exists", http.StatusConflict)
 		return

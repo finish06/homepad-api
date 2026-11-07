@@ -64,21 +64,19 @@ func (s *server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	count, err := s.store.CountUsers(ctx)
-	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-
-	// First registered user bootstraps as admin (spec Q2); after that,
-	// self-registration is only allowed when registration is open. Any mode
-	// other than RegistrationOpen fails closed (fail-safe; see #10).
-	role := "user"
-	if count == 0 {
-		role = "admin"
-	} else if s.registration != RegistrationOpen {
-		http.Error(w, "registration is invite-only", http.StatusForbidden)
-		return
+	open := s.registration == RegistrationOpen
+	// Fast refusal on a closed install that is already set up, before bcrypt.
+	// The store re-checks under the account lock, so this is only a shortcut.
+	if !open {
+		count, err := s.store.CountUsers(ctx)
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		if count > 0 {
+			http.Error(w, "registration is invite-only", http.StatusForbidden)
+			return
+		}
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(c.Password), bcrypt.DefaultCost)
@@ -87,14 +85,27 @@ func (s *server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	u, err := s.store.CreateUser(ctx, c.Email, string(hash), role)
-	if errors.Is(err, storage.ErrEmailTaken) {
+	// The first adult bootstraps as admin in every mode (spec Q2, AC-002);
+	// after that, self-registration needs RegistrationOpen, and any other mode
+	// fails closed (#10). RegisterUser decides both under one lock, so racing
+	// registrations on an empty install make exactly one admin (AC-003).
+	u, first, err := s.store.RegisterUser(ctx, c.Email, string(hash), open, s.maxAccounts)
+	switch {
+	case errors.Is(err, storage.ErrRegistrationClosed):
+		http.Error(w, "registration is invite-only", http.StatusForbidden)
+		return
+	case errors.Is(err, storage.ErrAccountLimit):
+		s.refuseAtLimit(w, r)
+		return
+	case errors.Is(err, storage.ErrEmailTaken):
 		http.Error(w, "email already registered", http.StatusConflict)
 		return
-	}
-	if err != nil {
+	case err != nil:
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
+	}
+	if first {
+		log.Printf("register: first account %s created as admin", u.ID)
 	}
 
 	writeJSON(w, http.StatusCreated, newUserView(u))

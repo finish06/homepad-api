@@ -104,7 +104,7 @@ func (s *server) catalogOwner(w http.ResponseWriter, r *http.Request, notFoundMs
 // non-admin session gets 403. The raw request body IS the PNG. Validation order:
 // byte size (413) → PNG magic-byte sniff (415) → dimensions (422). 204 on success.
 func (s *server) handlePutIcon(w http.ResponseWriter, r *http.Request) {
-	u, ok := s.requireAdmin(w, r)
+	owner, ok := s.requireCatalogAdmin(w, r)
 	if !ok {
 		return
 	}
@@ -142,7 +142,7 @@ func (s *server) handlePutIcon(w http.ResponseWriter, r *http.Request) {
 
 	sum := sha256.Sum256(body)
 	etag := hex.EncodeToString(sum[:])
-	err = s.store.PutIcon(r.Context(), r.PathValue("id"), u.ID, variant, body, cfg.Width, cfg.Height, etag)
+	err = s.store.PutIcon(r.Context(), r.PathValue("id"), owner, variant, body, cfg.Width, cfg.Height, etag)
 	if errors.Is(err, storage.ErrNotFound) {
 		http.Error(w, "no such service", http.StatusNotFound)
 		return
@@ -158,7 +158,7 @@ func (s *server) handlePutIcon(w http.ResponseWriter, r *http.Request) {
 // under the shared catalog model (SPEC-245-224, #224): a non-admin session gets
 // 403. Idempotent for the admin: 204 whether or not bytes existed (spec A11).
 func (s *server) handleDeleteIcon(w http.ResponseWriter, r *http.Request) {
-	u, ok := s.requireAdmin(w, r)
+	owner, ok := s.requireCatalogAdmin(w, r)
 	if !ok {
 		return
 	}
@@ -168,7 +168,7 @@ func (s *server) handleDeleteIcon(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := s.store.DeleteIcon(r.Context(), r.PathValue("id"), u.ID, variant)
+	err := s.store.DeleteIcon(r.Context(), r.PathValue("id"), owner, variant)
 	if errors.Is(err, storage.ErrNotFound) {
 		http.Error(w, "no such service", http.StatusNotFound)
 		return
@@ -199,13 +199,13 @@ var (
 // model (SPEC-245-224): a non-admin gets 403. The pipeline is PNG-only, so a
 // non-PNG favicon (or any fetch failure) returns 422 and leaves the icon as-is.
 func (s *server) handleFetchIcon(w http.ResponseWriter, r *http.Request) {
-	u, ok := s.requireAdmin(w, r)
+	owner, ok := s.requireCatalogAdmin(w, r)
 	if !ok {
 		return
 	}
 	id := r.PathValue("id")
 
-	rawURL, err := s.store.ServiceURL(r.Context(), id, u.ID)
+	rawURL, err := s.store.ServiceURL(r.Context(), id, owner)
 	if errors.Is(err, storage.ErrNotFound) {
 		http.Error(w, "no such service", http.StatusNotFound)
 		return
@@ -241,7 +241,7 @@ func (s *server) handleFetchIcon(w http.ResponseWriter, r *http.Request) {
 
 	sum := sha256.Sum256(body)
 	etag := hex.EncodeToString(sum[:])
-	if err := s.store.PutIcon(r.Context(), id, u.ID, "light", body, cfg.Width, cfg.Height, etag); err != nil {
+	if err := s.store.PutIcon(r.Context(), id, owner, "light", body, cfg.Width, cfg.Height, etag); err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
 			http.Error(w, "no such service", http.StatusNotFound)
 			return

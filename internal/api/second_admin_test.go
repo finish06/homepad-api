@@ -224,7 +224,7 @@ func TestSecondAdmin_EveryCatalogWriteRouteIsProbed(t *testing.T) {
 	for p := range secondAdminProbes {
 		assert.Contains(t, catalogWrites, p, "secondAdminProbes lists %q, which server.go does not register as catalog-write", p)
 	}
-	require.Len(t, catalogWrites, 12, "the AC-023 list: services ×3, categories ×4, icons ×3, library add")
+	require.Len(t, catalogWrites, 11, "the AC-023 list: services ×3, categories ×4, icons ×3, library add")
 }
 
 // AC-023 — a second admin gets the owner's status and effect on every

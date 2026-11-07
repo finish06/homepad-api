@@ -38,7 +38,7 @@ stubs remain. `go test ./...` runs 26 tests green; `go vet ./...` clean.
 
 - **Auth** — local register / login / logout (bcrypt, persistent sessions) **and**
   PocketID OIDC (Authorization Code + PKCE, ID-token verified on stdlib crypto,
-  account-link by email, admin role from the OIDC group). OIDC is fully additive
+  account-link by verified email, admin role from the OIDC group). OIDC is fully additive
   and only active when `OIDC_ENABLED=true`.
 - **Sessions** — stored in Postgres (migration `0017`), so a restart or deploy
   does not sign anyone out. Only `sha256(token)` is stored, never the token. The
@@ -94,6 +94,39 @@ Kid names are 1–40 characters and unique among kids (case-insensitive);
 `avatarColor` is one of the frontend accent ids (`blue`, `teal`, `green`,
 `yellow`, `orange`, `red`, `pink`, `purple`; default `blue`). A session `id` is
 an opaque handle, never the token or its hash.
+
+Invites and sign-up (SPEC-household-basics):
+
+```
+GET    /api/auth/config                         {oidcEnabled, registration, setupNeeded}   (public)
+POST   /api/admin/invites                       {name, role} → 201 {id, name, role, createdAt, expiresAt, token}
+GET    /api/admin/invites                       pending only, newest first (no token)
+DELETE /api/admin/invites/{id}                  → 204; 404 when not pending
+POST   /api/invites/lookup                      {token} → {name, role, inviterName, expiresAt}   (public)
+POST   /api/invites/accept                      {token, email, password, name?} → 201 /api/me body + session   (public)
+```
+
+- `HOMEPAD_REGISTRATION` defaults to `invite_only`. The first adult account
+  always registers and becomes admin, in every mode, and exactly one wins a
+  race (one advisory lock serializes every account insert). After that, an
+  admin adds adults with invites; `open` still lets anyone register.
+- An invite is for `admin` or `user`, never `kid`, works once and lasts 7
+  days. The token is 32 random bytes, base64url, returned once on create;
+  only its SHA-256 is stored (migration `0019`). Every dead token (unknown,
+  malformed, expired, used, revoked) gets the same 404 at lookup and accept.
+  Accept takes its role from the invite; any other field is a 400.
+- Lookup and accept share one in-process rate limit: 30 a minute, burst 10,
+  then 429 with `Retry-After`.
+- `HOMEPAD_MAX_ACCOUNTS` caps all accounts plus pending invites (unset or `0`:
+  no limit; anything else that isn't a whole number stops the API). At the
+  cap, kid create, invite create, `open` register and OIDC auto-create answer
+  409 `account limit reached (limit N)`. Accepting an invite and the first
+  account are never refused.
+- Every catalog write acts on the shared catalog for every admin, not just
+  the first (#87). Those routes are their own class in `server.go`, and
+  `second_admin_test.go` probes each one as a second admin.
+- OIDC links or creates an account by email only when the provider's
+  `email_verified` claim is true (#89).
 
 `GET /api/services` carries `responseTimeMs` per service — the latest Gatus
 check's response time — **only when there is one**; the key is omitted (never

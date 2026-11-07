@@ -43,12 +43,14 @@ type LibraryAppUpdate struct {
 }
 
 // ListLibrary returns every offer in sort_index order, each tagged with whether
-// userID already holds a copy (the `added` hint, A9).
+// userID already holds a copy (the `added` hint, A9). The API passes the
+// shared catalog owner, so the hint is the same for every caller (#87); ""
+// (no admin yet) marks nothing added.
 func (s *Store) ListLibrary(ctx context.Context, userID string) ([]LibraryOffer, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT la.id, la.name, la.url, la.icon, la.description, la.suggested_category, la.sort_index,
 		        EXISTS (SELECT 1 FROM services s
-		                 WHERE s.user_id = $1 AND s.source_library_id = la.id) AS added
+		                 WHERE s.user_id = NULLIF($1, '')::uuid AND s.source_library_id = la.id) AS added
 		   FROM library_apps la
 		  ORDER BY la.sort_index`, userID)
 	if err != nil {

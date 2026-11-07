@@ -89,7 +89,30 @@ func (s *Store) VisibleServiceIDs(ctx context.Context, u User) (*ServiceSet, err
 // default, as it does for every new account. The caller validates the name and
 // color; the schema backs both up.
 func (s *Store) CreateKid(ctx context.Context, name, avatarColor string) (User, error) {
-	u, err := scanUser(s.pool.QueryRow(ctx,
+	return s.CreateKidWithLimit(ctx, name, avatarColor, 0)
+}
+
+// CreateKidWithLimit is CreateKid under the account lock and the
+// HOMEPAD_MAX_ACCOUNTS cap (SPEC-household-basics AC-029): ErrAccountLimit
+// when one more account would pass limit (0 = no limit).
+func (s *Store) CreateKidWithLimit(ctx context.Context, name, avatarColor string, limit int) (User, error) {
+	var u User
+	err := s.withAccountLock(ctx, func(tx pgx.Tx) error {
+		if err := checkLimit(ctx, tx, limit); err != nil {
+			return err
+		}
+		var err error
+		u, err = insertKid(ctx, tx, name, avatarColor)
+		return err
+	})
+	if err != nil {
+		return User{}, err
+	}
+	return u, nil
+}
+
+func insertKid(ctx context.Context, q rowQuerier, name, avatarColor string) (User, error) {
+	u, err := scanUser(q.QueryRow(ctx,
 		`INSERT INTO users (email, password_hash, role, display_name, avatar_color,
 		                    show_health_bar, density_pref, show_uptime_display)
 		 VALUES (NULL, NULL, 'kid', $1, $2, FALSE, 'large',

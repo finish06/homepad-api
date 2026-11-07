@@ -210,22 +210,11 @@ func (s *Store) CountUsers(ctx context.Context) (int, error) {
 // CreateUser creates an adult account (register, OIDC). It cannot create a
 // kid: a kid has no email, and the users_kid_credentials_check constraint
 // refuses a kid row that carries one. Kids are created by CreateKid only.
+//
+// It takes no lock and no cap: it is the seeding and test path. The request
+// paths use RegisterUser, CreateOIDCUser and AcceptInvite (accounts.go).
 func (s *Store) CreateUser(ctx context.Context, email, passwordHash, role string) (User, error) {
-	u, err := scanUser(s.pool.QueryRow(ctx,
-		`INSERT INTO users (email, password_hash, role, show_uptime_display)
-		 VALUES ($1, $2, $3,
-		         COALESCE((SELECT show_uptime_display FROM system_settings WHERE id = 1), TRUE))
-		 RETURNING `+userColumns,
-		email, passwordHash, role,
-	))
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-		return User{}, ErrEmailTaken
-	}
-	if err != nil {
-		return User{}, err
-	}
-	return u, nil
+	return insertUser(ctx, s.pool, email, passwordHash, role, "")
 }
 
 // UserByEmail resolves an adult by email (login, OIDC). It never returns a
