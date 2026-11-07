@@ -23,6 +23,10 @@ type Deps struct {
 	Sessions     session.Store
 	Registration RegistrationMode
 	OIDC         oidc.Config
+	// MaxAccounts is HOMEPAD_MAX_ACCOUNTS: 0 is no limit.
+	MaxAccounts int
+	// InviteLimit is the public invite routes' rate limit; zero is the default.
+	InviteLimit RateLimit
 }
 
 type server struct {

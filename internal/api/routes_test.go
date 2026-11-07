@@ -50,16 +50,23 @@ import (
 //	                requireNotKid middleware, applied by class in server.go).
 //	admin-only    — 403 for anyone but an admin (requireAdmin in the handler,
 //	                and requireNotKid in front of it).
+//	catalog-write — admin-only, and the write acts on the shared catalog
+//	                owner's rows for every admin (SPEC-household-basics
+//	                AC-023). second_admin_test.go probes each one as a
+//	                second admin (AC-025).
 var expectedRouteClasses = map[string]string{
 	// Auth bootstrap and public config.
-	"POST /api/register":               "public",
-	"POST /api/login":                  "public",
-	"GET /api/auth/config":             "public",
-	"GET /api/auth/oidc/login":         "public",
-	"GET /api/auth/oidc/callback":      "public",
-	"GET /api/system/config":           "public",
-	"GET /health":                      "public",
-	"GET /live":                        "public",
+	"POST /api/register":          "public",
+	"POST /api/login":             "public",
+	"GET /api/auth/config":        "public",
+	"GET /api/auth/oidc/login":    "public",
+	"GET /api/auth/oidc/callback": "public",
+	"GET /api/system/config":      "public",
+	"GET /health":                 "public",
+	"GET /live":                   "public",
+	// SPEC-household-basics §7 — the invite link's two public, rate-limited routes.
+	"POST /api/invites/lookup":         "public",
+	"POST /api/invites/accept":         "public",
 	"POST /api/logout":                 "catalog-free",
 	"GET /api/me":                      "catalog-free",
 	"PATCH /api/me":                    "catalog-free", // a kid may send themePref only (handler-enforced, AC-007)
@@ -79,24 +86,26 @@ var expectedRouteClasses = map[string]string{
 	"PUT /api/layout":          "kid-forbidden",
 	"POST /api/status/refresh": "kid-forbidden",
 
-	// Catalog, category, library, icon-write, admin and settings mutations.
-	"POST /api/services":                       "admin-only",
-	"PATCH /api/services/{id}":                 "admin-only",
-	"DELETE /api/services/{id}":                "admin-only",
-	"POST /api/categories":                     "admin-only",
-	"PUT /api/categories/order":                "admin-only",
-	"PATCH /api/categories/{id}":               "admin-only",
-	"DELETE /api/categories/{id}":              "admin-only",
-	"PUT /api/services/{id}/icon/{variant}":    "admin-only",
-	"DELETE /api/services/{id}/icon/{variant}": "admin-only",
-	"POST /api/services/{id}/fetch-icon":       "admin-only",
-	"POST /api/library":                        "admin-only",
-	"PUT /api/library/order":                   "admin-only",
-	"PATCH /api/library/{id}":                  "admin-only",
-	"DELETE /api/library/{id}":                 "admin-only",
-	"POST /api/library/{id}/add":               "admin-only",
-	"PATCH /api/admin/settings":                "admin-only",
-	"GET /api/admin/env-config":                "admin-only",
+	// Catalog writes: admin-only, acting on the shared catalog (#87).
+	"POST /api/services":                       "catalog-write",
+	"PATCH /api/services/{id}":                 "catalog-write",
+	"DELETE /api/services/{id}":                "catalog-write",
+	"POST /api/categories":                     "catalog-write",
+	"PUT /api/categories/order":                "catalog-write",
+	"PATCH /api/categories/{id}":               "catalog-write",
+	"DELETE /api/categories/{id}":              "catalog-write",
+	"PUT /api/services/{id}/icon/{variant}":    "catalog-write",
+	"DELETE /api/services/{id}/icon/{variant}": "catalog-write",
+	"POST /api/services/{id}/fetch-icon":       "catalog-write",
+	"POST /api/library/{id}/add":               "catalog-write",
+
+	// Library, admin and settings mutations.
+	"POST /api/library":         "admin-only",
+	"PUT /api/library/order":    "admin-only",
+	"PATCH /api/library/{id}":   "admin-only",
+	"DELETE /api/library/{id}":  "admin-only",
+	"PATCH /api/admin/settings": "admin-only",
+	"GET /api/admin/env-config": "admin-only",
 
 	// The admin Accounts API (SPEC-kid-accounts §7, plan TASK-305).
 	"GET /api/admin/accounts":                    "admin-only",
@@ -108,6 +117,11 @@ var expectedRouteClasses = map[string]string{
 	"GET /api/admin/kids/{id}/sessions":          "admin-only",
 	"DELETE /api/admin/kids/{id}/sessions/{sid}": "admin-only",
 	"POST /api/admin/kids/{id}/sign-in-here":     "admin-only",
+
+	// Invites (SPEC-household-basics §7).
+	"POST /api/admin/invites":        "admin-only",
+	"GET /api/admin/invites":         "admin-only",
+	"DELETE /api/admin/invites/{id}": "admin-only",
 }
 
 // allRoutes is the full registration: OIDC on (so its two routes register)
@@ -228,6 +242,8 @@ func concretePath(w kidWorld, offerID, pattern string) (method, path string) {
 		path = strings.Replace(path, "{id}", offerID, 1)
 	case strings.HasPrefix(path, "/api/admin/kids/{id}"):
 		path = strings.Replace(path, "{id}", w.kidID, 1)
+	case strings.HasPrefix(path, "/api/admin/invites/{id}"):
+		path = strings.Replace(path, "{id}", "00000000-0000-0000-0000-000000000000", 1)
 	}
 	path = strings.Replace(path, "{variant}", "light", 1)
 	path = strings.Replace(path, "{sid}", "0000", 1)
@@ -275,7 +291,7 @@ func TestRoutes_KidProbeOfEveryRoute(t *testing.T) {
 			assertNoHiddenMarkers(t, w, rt.Pattern, body)
 
 			switch rt.Class {
-			case "kid-forbidden", "admin-only":
+			case "kid-forbidden", "admin-only", "catalog-write":
 				assert.Equal(t, http.StatusForbidden, resp.StatusCode, "%s is %s: a kid gets 403", rt.Pattern, rt.Class)
 			case "kid-filtered", "catalog-free":
 				assert.NotEqual(t, http.StatusForbidden, resp.StatusCode, "%s is %s: a kid may call it", rt.Pattern, rt.Class)
@@ -298,7 +314,7 @@ func TestRoutes_KidProbeOfEveryRoute(t *testing.T) {
 				ur := doJSON(t, method, w.env.URL+path, "non-admin-session", nil)
 				ur.Body.Close()
 				assert.NotEqual(t, http.StatusForbidden, ur.StatusCode, "%s is open to plain users", rt.Pattern)
-			case "admin-only":
+			case "admin-only", "catalog-write":
 				ur := doJSON(t, method, w.env.URL+path, "non-admin-session", nil)
 				ur.Body.Close()
 				assert.Equal(t, http.StatusForbidden, ur.StatusCode, "%s is admin-only", rt.Pattern)

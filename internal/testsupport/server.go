@@ -26,6 +26,13 @@ import (
 // Skipped when DATABASE_URL is unset. Cleanup is registered on t.
 func NewOIDCServer(t *testing.T, cfg oidc.Config) (*httptest.Server, *storage.Store) {
 	t.Helper()
+	return NewOIDCServerWith(t, cfg, Options{})
+}
+
+// NewOIDCServerWith is NewOIDCServer with options (registration mode and
+// account cap; Empty is implied).
+func NewOIDCServerWith(t *testing.T, cfg oidc.Config, opts Options) (*httptest.Server, *storage.Store) {
+	t.Helper()
 
 	// AC1 — guard BEFORE anything destructive (Migrate + TRUNCATE below).
 	dsn := dbguard.RequireTestDatabase(t)
@@ -43,12 +50,18 @@ func NewOIDCServer(t *testing.T, cfg oidc.Config) (*httptest.Server, *storage.St
 	truncate(t, ctx, dsn)
 
 	poller := gatus.NewPoller(gatus.NewClient("http://127.0.0.1:1"), time.Hour)
+	registration := api.RegistrationOpen
+	if opts.Registration != nil {
+		registration = *opts.Registration
+	}
 	h := api.New(api.Deps{
 		Store:        store,
 		Poller:       poller,
 		Sessions:     session.NewPgStore(store.Pool()),
-		Registration: api.RegistrationOpen,
+		Registration: registration,
 		OIDC:         cfg,
+		MaxAccounts:  opts.MaxAccounts,
+		InviteLimit:  opts.InviteLimit,
 	})
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
@@ -165,7 +178,32 @@ func gatusStub(t *testing.T, endpoints map[string][]GatusResult) string {
 	return stub.URL
 }
 
+// Options configures NewEnvWith (SPEC-household-basics). The zero value is
+// the NewEnv fixture: open registration, no account cap, the default invite
+// rate limit and the seeded users, sessions and services.
+type Options struct {
+	// Registration overrides the fixture's RegistrationOpen.
+	Registration *api.RegistrationMode
+	// MaxAccounts is HOMEPAD_MAX_ACCOUNTS; 0 is no limit.
+	MaxAccounts int
+	// InviteLimit overrides the public invite routes' rate limit.
+	InviteLimit api.RateLimit
+	// Empty skips every seed: a fresh install with no accounts at all.
+	Empty bool
+}
+
+// NewEnvWith is NewEnv with the given options.
+func NewEnvWith(t *testing.T, opts Options) *Env {
+	t.Helper()
+	return newServerWith(t, "http://127.0.0.1:1", opts)
+}
+
 func newServer(t *testing.T, gatusURL string) *Env {
+	t.Helper()
+	return newServerWith(t, gatusURL, Options{})
+}
+
+func newServerWith(t *testing.T, gatusURL string, opts Options) *Env {
 	t.Helper()
 
 	// AC1 — guard BEFORE anything destructive (Migrate + TRUNCATE below).
@@ -183,6 +221,25 @@ func newServer(t *testing.T, gatusURL string) *Env {
 	}
 	truncate(t, ctx, dsn)
 
+	sessions := session.NewPgStore(store.Pool())
+	registration := api.RegistrationOpen
+	if opts.Registration != nil {
+		registration = *opts.Registration
+	}
+	deps := api.Deps{
+		Store:        store,
+		Poller:       gatus.NewPoller(gatus.NewClient(gatusURL), time.Hour),
+		Sessions:     sessions,
+		Registration: registration,
+		MaxAccounts:  opts.MaxAccounts,
+		InviteLimit:  opts.InviteLimit,
+	}
+	if opts.Empty {
+		srv := httptest.NewServer(api.New(deps))
+		t.Cleanup(srv.Close)
+		return &Env{Server: srv, Store: store, Sessions: sessions, DSN: dsn}
+	}
+
 	admin := seedUser(t, ctx, store, "admin@homepad.test", "stitch-admin-pw", "admin")
 	user := seedUser(t, ctx, store, "user@homepad.test", "stitch-user-pw", "user")
 	// AC A1's login test signs in as alice without registering first, so seed her.
@@ -191,7 +248,6 @@ func newServer(t *testing.T, gatusURL string) *Env {
 	// Fixture sessions live in Postgres, exactly like production sign-ins, so
 	// every integration test exercises the persistent store (AC-010). Only
 	// sha256 of each fixed token is stored.
-	sessions := session.NewPgStore(store.Pool())
 	for token, owner := range map[string]string{
 		"admin-session":         admin,
 		"non-admin-session":     user,
@@ -208,22 +264,14 @@ func newServer(t *testing.T, gatusURL string) *Env {
 
 	// v9 — services are per-user now. Seed each test user their OWN two
 	// monitored entries so /api/services is non-empty for whichever session a
-	// test signs in as. Gatus points at a black hole below, so all resolve
-	// UNKNOWN (A9).
+	// test signs in as. Gatus is gatusURL, a black hole unless a test stubs
+	// it, so all resolve UNKNOWN (A9).
 	for _, owner := range []string{admin, user} {
 		_ = seedService(t, ctx, store, owner, "gitea", "Gitea", "core_gitea")
 		_ = seedService(t, ctx, store, owner, "grafana", "Grafana", "core_grafana")
 	}
 
-	poller := gatus.NewPoller(gatus.NewClient(gatusURL), time.Hour)
-
-	h := api.New(api.Deps{
-		Store:        store,
-		Poller:       poller,
-		Sessions:     sessions,
-		Registration: api.RegistrationOpen,
-	})
-	srv := httptest.NewServer(h)
+	srv := httptest.NewServer(api.New(deps))
 	t.Cleanup(srv.Close)
 	return &Env{Server: srv, Store: store, Sessions: sessions, DSN: dsn, AdminID: admin, UserID: user}
 }
