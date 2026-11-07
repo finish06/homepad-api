@@ -21,7 +21,7 @@ import (
 // is resolved with KidByID, which treats an adult's id as not found.
 
 const (
-	maxKidNameLen      = 40 // characters, not bytes (UX §3)
+	maxNameLen         = 40 // characters, not bytes (UX §3)
 	defaultAvatarColor = "blue"
 	maxAdminBody       = 64 * 1024
 )
@@ -93,15 +93,16 @@ func decodeStrict(w http.ResponseWriter, r *http.Request, dst any) bool {
 	return true
 }
 
-// cleanKidName trims and validates a kid name: 1–40 characters, no control
+// cleanDisplayName trims and validates an account name — a kid's name, an
+// invite's name, or the name an invitee picks: 1–40 characters, no control
 // characters.
-func cleanKidName(raw string) (string, bool) {
+func cleanDisplayName(raw string) (string, bool) {
 	name := strings.TrimSpace(raw)
 	if !utf8.ValidString(name) {
 		return "", false
 	}
 	n := utf8.RuneCountInString(name)
-	if n < 1 || n > maxKidNameLen {
+	if n < 1 || n > maxNameLen {
 		return "", false
 	}
 	for _, c := range name {
@@ -112,7 +113,7 @@ func cleanKidName(raw string) (string, bool) {
 	return name, true
 }
 
-const kidNameRule = "name must be 1-40 characters with no control characters"
+const displayNameRule = "name must be 1-40 characters with no control characters"
 
 // kidFor resolves the {id} path value to a kid, writing 404 (not a kid —
 // including an adult's id) or 500 itself.
@@ -165,12 +166,12 @@ func (s *server) handleCreateKid(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if in.Name == nil {
-		http.Error(w, kidNameRule, http.StatusBadRequest)
+		http.Error(w, displayNameRule, http.StatusBadRequest)
 		return
 	}
-	name, ok := cleanKidName(*in.Name)
+	name, ok := cleanDisplayName(*in.Name)
 	if !ok {
-		http.Error(w, kidNameRule, http.StatusBadRequest)
+		http.Error(w, displayNameRule, http.StatusBadRequest)
 		return
 	}
 	color := defaultAvatarColor
@@ -223,9 +224,9 @@ func (s *server) handleUpdateKid(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if in.Name != nil {
-		name, ok := cleanKidName(*in.Name)
+		name, ok := cleanDisplayName(*in.Name)
 		if !ok {
-			http.Error(w, kidNameRule, http.StatusBadRequest)
+			http.Error(w, displayNameRule, http.StatusBadRequest)
 			return
 		}
 		in.Name = &name

@@ -98,12 +98,12 @@ func (s *server) handleCreateInvite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if in.Name == nil {
-		http.Error(w, kidNameRule, http.StatusBadRequest)
+		http.Error(w, displayNameRule, http.StatusBadRequest)
 		return
 	}
-	name, ok := cleanKidName(*in.Name)
+	name, ok := cleanDisplayName(*in.Name)
 	if !ok {
-		http.Error(w, kidNameRule, http.StatusBadRequest)
+		http.Error(w, displayNameRule, http.StatusBadRequest)
 		return
 	}
 	// Only the two adult roles. A kid is never invited: kids are made in
@@ -246,9 +246,9 @@ func (s *server) handleAcceptInvite(w http.ResponseWriter, r *http.Request) {
 	}
 	name := ""
 	if in.Name != nil {
-		n, ok := cleanKidName(*in.Name)
+		n, ok := cleanDisplayName(*in.Name)
 		if !ok {
-			http.Error(w, kidNameRule, http.StatusBadRequest)
+			http.Error(w, displayNameRule, http.StatusBadRequest)
 			return
 		}
 		name = n
