@@ -46,6 +46,16 @@ type mockIdP struct {
 	key    *rsa.PrivateKey
 	email  string
 	groups []string
+	// verified is the ID token's email_verified claim, and uiVerified the
+	// userinfo one (#89). nil leaves the claim out. Both default to true,
+	// as PocketID sends for a verified address.
+	verified   any
+	uiVerified any
+	// idTokenEmail false leaves email (and email_verified) out of the ID
+	// token, so the callback falls back to userinfo.
+	idTokenEmail bool
+	// uiEmail, when set, is the userinfo email in place of email.
+	uiEmail string
 
 	codes map[string]codeData
 }
@@ -55,7 +65,8 @@ func newMockIdP(t *testing.T, email string, groups []string) *mockIdP {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
 
-	m := &mockIdP{key: key, email: email, groups: groups, codes: map[string]codeData{}}
+	m := &mockIdP{key: key, email: email, groups: groups, verified: true, uiVerified: true, idTokenEmail: true,
+		codes: map[string]codeData{}}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /.well-known/openid-configuration", m.handleDiscovery)
@@ -159,11 +170,19 @@ func (m *mockIdP) handleToken(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *mockIdP) handleUserinfo(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, map[string]any{
+	uiEmail := m.email
+	if m.uiEmail != "" {
+		uiEmail = m.uiEmail
+	}
+	body := map[string]any{
 		"sub":    "mock-subject",
-		"email":  m.email,
+		"email":  uiEmail,
 		"groups": m.groups,
-	})
+	}
+	if m.uiVerified != nil {
+		body["email_verified"] = m.uiVerified
+	}
+	writeJSON(w, body)
 }
 
 func (m *mockIdP) signIDToken(nonce string) string {
@@ -175,8 +194,13 @@ func (m *mockIdP) signIDToken(nonce string) string {
 		"exp":    now.Add(time.Hour).Unix(),
 		"iat":    now.Unix(),
 		"nonce":  nonce,
-		"email":  m.email,
 		"groups": m.groups,
+	}
+	if m.idTokenEmail {
+		claims["email"] = m.email
+		if m.verified != nil {
+			claims["email_verified"] = m.verified
+		}
 	}
 	header := map[string]string{"alg": "RS256", "typ": "JWT", "kid": testKID}
 	hb, _ := json.Marshal(header)
@@ -199,6 +223,38 @@ func writeJSON(w http.ResponseWriter, v any) {
 // runOIDCLogin drives the full browser round-trip against the mocked IdP and
 // returns the homepad_session cookie the callback sets on success.
 func runOIDCLogin(t *testing.T, homepad *httptest.Server, idp *mockIdP) *http.Cookie {
+	t.Helper()
+	cbResp := oidcCallback(t, homepad, idp)
+	cbResp.Body.Close()
+	require.Equal(t, http.StatusFound, cbResp.StatusCode, "callback should redirect into the app")
+	assert.Equal(t, "/", cbResp.Header.Get("Location"))
+
+	for _, c := range cbResp.Cookies() {
+		if c.Name == "homepad_session" {
+			return c
+		}
+	}
+	t.Fatal("callback did not set a homepad_session cookie")
+	return nil
+}
+
+// runOIDCLoginStatus drives the round-trip and returns the callback's status,
+// for flows that are meant to be refused.
+func runOIDCLoginStatus(t *testing.T, homepad *httptest.Server, idp *mockIdP) int {
+	t.Helper()
+	cbResp := oidcCallback(t, homepad, idp)
+	cbResp.Body.Close()
+	for _, c := range cbResp.Cookies() {
+		if c.Name == "homepad_session" && c.MaxAge >= 0 && c.Value != "" {
+			t.Errorf("a refused callback (status %d) must not set a session cookie", cbResp.StatusCode)
+		}
+	}
+	return cbResp.StatusCode
+}
+
+// oidcCallback runs login → IdP authorize → callback and returns the
+// callback's raw response.
+func oidcCallback(t *testing.T, homepad *httptest.Server, idp *mockIdP) *http.Response {
 	t.Helper()
 	// A client that surfaces each redirect instead of following it, so the test
 	// can hop deliberately between homepad and the IdP.
@@ -239,17 +295,7 @@ func runOIDCLogin(t *testing.T, homepad *httptest.Server, idp *mockIdP) *http.Co
 	cb := homepad.URL + "/api/auth/oidc/callback?code=" + url.QueryEscape(code) + "&state=" + url.QueryEscape(state)
 	cbResp, err := client.Get(cb)
 	require.NoError(t, err)
-	cbResp.Body.Close()
-	require.Equal(t, http.StatusFound, cbResp.StatusCode, "callback should redirect into the app")
-	assert.Equal(t, "/", cbResp.Header.Get("Location"))
-
-	for _, c := range cbResp.Cookies() {
-		if c.Name == "homepad_session" {
-			return c
-		}
-	}
-	t.Fatal("callback did not set a homepad_session cookie")
-	return nil
+	return cbResp
 }
 
 // fetchMe calls /api/me with the session cookie and returns the user view.

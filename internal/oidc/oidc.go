@@ -204,6 +204,40 @@ func (p *Provider) Exchange(ctx context.Context, code, verifier string) (idToken
 type Claims struct {
 	Email  string   `json:"email"`
 	Groups []string `json:"groups"`
+	// EmailVerified is the provider's email_verified claim: nil when it sent
+	// none. homepad links or creates an account by email only when it is
+	// true (homepad-api #89).
+	EmailVerified *bool `json:"-"`
+}
+
+// optionalBool decodes the email_verified claim. OIDC Core makes it a JSON
+// boolean; some providers send the string "true" or "false", which is
+// accepted too. Absent leaves it unset; any other value reads as false, so a
+// strange claim never counts as verified.
+type optionalBool struct {
+	set   bool
+	value bool
+}
+
+func (o *optionalBool) UnmarshalJSON(b []byte) error {
+	o.set = true
+	switch string(b) {
+	case "true", `"true"`:
+		o.value = true
+	case "null":
+		o.set = false
+	default:
+		o.value = false
+	}
+	return nil
+}
+
+func (o optionalBool) ptr() *bool {
+	if !o.set {
+		return nil
+	}
+	v := o.value
+	return &v
 }
 
 // Userinfo fetches the userinfo endpoint with accessToken. It is used as a
@@ -231,11 +265,15 @@ func (p *Provider) Userinfo(ctx context.Context, accessToken string) (Claims, er
 	if resp.StatusCode != http.StatusOK {
 		return Claims{}, fmt.Errorf("oidc: userinfo: status %d", resp.StatusCode)
 	}
-	var c Claims
+	var c struct {
+		Email         string       `json:"email"`
+		Groups        []string     `json:"groups"`
+		EmailVerified optionalBool `json:"email_verified"`
+	}
 	if err := json.NewDecoder(resp.Body).Decode(&c); err != nil {
 		return Claims{}, fmt.Errorf("oidc: userinfo decode: %w", err)
 	}
-	return c, nil
+	return Claims{Email: c.Email, Groups: c.Groups, EmailVerified: c.EmailVerified.ptr()}, nil
 }
 
 // --- PKCE / state / nonce helpers ---

@@ -103,7 +103,7 @@ func (s *server) visibleCategoryIDs(w http.ResponseWriter, r *http.Request, owne
 // trust the client gate). A duplicate name gets 409; the new category is appended
 // last (sort_index max+1). This supersedes the v9/A4 per-user create model.
 func (s *server) handleCreateCategory(w http.ResponseWriter, r *http.Request) {
-	u, ok := s.requireAdmin(w, r)
+	owner, ok := s.requireCatalogAdmin(w, r)
 	if !ok {
 		return
 	}
@@ -121,7 +121,7 @@ func (s *server) handleCreateCategory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	c, err := s.store.CreateCategory(r.Context(), u.ID, in.Name)
+	c, err := s.store.CreateCategory(r.Context(), owner, in.Name)
 	if errors.Is(err, storage.ErrNameTaken) {
 		http.Error(w, "a category with that name already exists", http.StatusConflict)
 		return
@@ -141,7 +141,7 @@ func (s *server) handleCreateCategory(w http.ResponseWriter, r *http.Request) {
 // At least one must be present. Admin-only under the shared catalog model
 // (SPEC-245-224, #224): a non-admin session gets 403.
 func (s *server) handleUpdateCategory(w http.ResponseWriter, r *http.Request) {
-	u, ok := s.requireAdmin(w, r)
+	owner, ok := s.requireCatalogAdmin(w, r)
 	if !ok {
 		return
 	}
@@ -173,7 +173,7 @@ func (s *server) handleUpdateCategory(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "name is required", http.StatusBadRequest)
 			return
 		}
-		c, err = s.store.RenameCategory(r.Context(), id, u.ID, name)
+		c, err = s.store.RenameCategory(r.Context(), id, owner, name)
 		if errors.Is(err, storage.ErrNotFound) {
 			http.Error(w, "no such category", http.StatusNotFound)
 			return
@@ -189,7 +189,7 @@ func (s *server) handleUpdateCategory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if in.GridWidth != nil {
-		c, err = s.store.SetCategoryWidth(r.Context(), id, u.ID, *in.GridWidth)
+		c, err = s.store.SetCategoryWidth(r.Context(), id, owner, *in.GridWidth)
 		if errors.Is(err, storage.ErrNotFound) {
 			http.Error(w, "no such category", http.StatusNotFound)
 			return
@@ -208,7 +208,7 @@ func (s *server) handleUpdateCategory(w http.ResponseWriter, r *http.Request) {
 // not naming one of the caller's categories → 404. Success is 204. Admin-only
 // under the shared catalog model (SPEC-245-224, #224): a non-admin gets 403.
 func (s *server) handleSetCategoryOrder(w http.ResponseWriter, r *http.Request) {
-	u, ok := s.requireAdmin(w, r)
+	owner, ok := s.requireCatalogAdmin(w, r)
 	if !ok {
 		return
 	}
@@ -221,7 +221,7 @@ func (s *server) handleSetCategoryOrder(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	err := s.store.SetCategoryOrder(r.Context(), u.ID, in.Order)
+	err := s.store.SetCategoryOrder(r.Context(), owner, in.Order)
 	if errors.Is(err, storage.ErrNotFound) {
 		http.Error(w, "no such category in order", http.StatusNotFound)
 		return
@@ -238,11 +238,11 @@ func (s *server) handleSetCategoryOrder(w http.ResponseWriter, r *http.Request) 
 // gets 403. Idempotent: deleting an absent category is still 204. The FK is ON
 // DELETE SET NULL, so the category's apps fall back to Uncategorized — none deleted.
 func (s *server) handleDeleteCategory(w http.ResponseWriter, r *http.Request) {
-	u, ok := s.requireAdmin(w, r)
+	owner, ok := s.requireCatalogAdmin(w, r)
 	if !ok {
 		return
 	}
-	if err := s.store.DeleteCategory(r.Context(), r.PathValue("id"), u.ID); err != nil {
+	if err := s.store.DeleteCategory(r.Context(), r.PathValue("id"), owner); err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}

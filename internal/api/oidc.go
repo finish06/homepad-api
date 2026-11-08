@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"strings"
 
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/oidc"
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/storage"
@@ -17,11 +18,28 @@ import (
 // overwrite the hash).
 const oidcNoPassword = "oidc:no-local-password"
 
-// handleOIDCConfig reports whether OIDC login is available, so the web client
-// can show or hide the "Log in with PocketID" button. It is always registered
-// (even when OIDC is disabled) and never requires a session.
+// handleOIDCConfig is GET /api/auth/config: what the sign-in screen needs
+// before anyone is signed in. oidcEnabled shows or hides the "Log in with
+// PocketID" button; registration ("open" or "invite_only") decides whether
+// "Create account" shows; setupNeeded (no adult account yet) turns the screen
+// into "Set up Homepad" (SPEC-household-basics AC-004). Always registered,
+// never requires a session.
 func (s *server) handleOIDCConfig(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]bool{"oidcEnabled": s.oidc.Enabled})
+	registration := "invite_only"
+	if s.registration == RegistrationOpen {
+		registration = "open"
+	}
+	adults, err := s.store.CountUsers(r.Context())
+	if err != nil {
+		// Fail toward the normal sign-in screen, never toward setup.
+		log.Printf("auth config: count adults: %v", err)
+		adults = 1
+	}
+	writeJSON(w, http.StatusOK, struct {
+		OIDCEnabled  bool   `json:"oidcEnabled"`
+		Registration string `json:"registration"`
+		SetupNeeded  bool   `json:"setupNeeded"`
+	}{s.oidc.Enabled, registration, adults == 0})
 }
 
 // handleOIDCLogin begins the Authorization Code + PKCE flow: it mints state,
@@ -77,11 +95,16 @@ func (s *server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// The ID token is the primary identity source; fall back to userinfo only
-	// when it omits the email or groups we need.
-	if claims.Email == "" || len(claims.Groups) == 0 {
+	// when it omits the email, its email_verified claim, or the groups.
+	if claims.Email == "" || claims.EmailVerified == nil || len(claims.Groups) == 0 {
 		if ui, err := s.provider.Userinfo(ctx, accessToken); err == nil {
-			if claims.Email == "" {
-				claims.Email = ui.Email
+			switch {
+			case claims.Email == "":
+				// The email comes from userinfo, so its verification must too.
+				claims.Email, claims.EmailVerified = ui.Email, ui.EmailVerified
+			case claims.EmailVerified == nil && strings.EqualFold(ui.Email, claims.Email):
+				// A userinfo claim counts only for the address it describes.
+				claims.EmailVerified = ui.EmailVerified
 			}
 			if len(claims.Groups) == 0 {
 				claims.Groups = ui.Groups
@@ -92,8 +115,20 @@ func (s *server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "oidc identity has no email", http.StatusUnauthorized)
 		return
 	}
+	// #89 — an account is linked or created by email only when the provider
+	// says the email is verified. Otherwise anyone who could set an address
+	// at the provider could sign in as the local account that has it.
+	if claims.EmailVerified == nil || !*claims.EmailVerified {
+		log.Printf("oidc callback: refused sign-in: email_verified is not true")
+		http.Error(w, "oidc email is not verified", http.StatusForbidden)
+		return
+	}
 
 	u, err := s.resolveOIDCUser(ctx, claims)
+	if errors.Is(err, storage.ErrAccountLimit) {
+		s.refuseAtLimit(w, r)
+		return
+	}
 	if err != nil {
 		log.Printf("oidc callback: resolve user: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -111,7 +146,9 @@ func (s *server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 
 // resolveOIDCUser links the OIDC identity to a homepad user by email: an
 // existing local account is reused as-is; otherwise a new account is created,
-// with the admin role when the user's groups include OIDC_ADMIN_GROUP.
+// with the admin role when the user's groups include OIDC_ADMIN_GROUP, within
+// HOMEPAD_MAX_ACCOUNTS (storage.ErrAccountLimit). The caller has checked that
+// the email is verified.
 func (s *server) resolveOIDCUser(ctx context.Context, claims oidc.Claims) (storage.User, error) {
 	u, err := s.store.UserByEmail(ctx, claims.Email)
 	if err == nil {
@@ -130,7 +167,7 @@ func (s *server) resolveOIDCUser(ctx context.Context, claims oidc.Claims) (stora
 	if s.oidc.AdminGroup != "" && containsString(claims.Groups, s.oidc.AdminGroup) {
 		role = "admin"
 	}
-	return s.store.CreateUser(ctx, claims.Email, oidcNoPassword, role)
+	return s.store.CreateOIDCUser(ctx, claims.Email, oidcNoPassword, role, s.maxAccounts)
 }
 
 func containsString(xs []string, want string) bool {

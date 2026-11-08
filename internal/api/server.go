@@ -23,6 +23,10 @@ type Deps struct {
 	Sessions     session.Store
 	Registration RegistrationMode
 	OIDC         oidc.Config
+	// MaxAccounts is HOMEPAD_MAX_ACCOUNTS: 0 is no limit.
+	MaxAccounts int
+	// InviteLimit is the public invite routes' rate limit; zero is the default.
+	InviteLimit RateLimit
 }
 
 type server struct {
@@ -34,6 +38,11 @@ type server struct {
 	oidc         oidc.Config
 	provider     *oidc.Provider
 	pending      *oidc.Pending
+	// maxAccounts is HOMEPAD_MAX_ACCOUNTS (0 = no limit).
+	maxAccounts int
+	// inviteBucket is the one rate limit the public invite routes share
+	// (SPEC-household-basics §3.4). Per server, so per process.
+	inviteBucket *tokenBucket
 }
 
 func New(d Deps) http.Handler {
@@ -49,6 +58,8 @@ func newServer(d Deps) *server {
 		registration: d.Registration,
 		cookieSecure: ParseCookieSecure(os.Getenv("COOKIE_SECURE")),
 		oidc:         d.OIDC,
+		maxAccounts:  d.MaxAccounts,
+		inviteBucket: newTokenBucket(d.InviteLimit, time.Now),
 	}
 }
 
@@ -73,6 +84,12 @@ const (
 	// classAdminOnly: requireAdmin in the handler, and requireNotKid in front
 	// of it, so a kid is refused even if a handler forgot its admin gate.
 	classAdminOnly routeClass = "admin-only"
+	// classCatalogWrite: admin-only, enforced exactly like classAdminOnly,
+	// and the write acts on the shared catalog for every admin: the handler
+	// gets the owner from requireCatalogAdmin (SPEC-household-basics
+	// AC-023). second_admin_test.go probes every route of this class as a
+	// second admin, reading the list from here (AC-025).
+	classCatalogWrite routeClass = "catalog-write"
 )
 
 // router is the only place a route is registered (routes_test.go checks that
@@ -99,7 +116,7 @@ func (rt *router) handle(pattern string, class routeClass, h http.HandlerFunc) {
 	switch {
 	case rt.stub && pattern != livePattern:
 		handler = http.HandlerFunc(notImplemented)
-	case class == classKidForbidden || class == classAdminOnly:
+	case class == classKidForbidden || class == classAdminOnly || class == classCatalogWrite:
 		handler = rt.s.requireNotKid(h)
 	}
 	rt.mux.Handle(pattern, handler)
@@ -121,18 +138,18 @@ func (s *server) routes(d Deps) (http.Handler, []registeredRoute) {
 	rt.handle("GET /api/me/collapsed-categories", classKidFiltered, s.handleGetCollapsedCategories)
 	rt.handle("PUT /api/me/collapsed-categories", classKidForbidden, s.handleSetCollapsedCategories)
 	rt.handle("GET /api/services", classKidFiltered, s.handleListServices)
-	rt.handle("POST /api/services", classAdminOnly, s.handleCreateService)
-	rt.handle("PATCH /api/services/{id}", classAdminOnly, s.handleUpdateService)
-	rt.handle("DELETE /api/services/{id}", classAdminOnly, s.handleDeleteService)
+	rt.handle("POST /api/services", classCatalogWrite, s.handleCreateService)
+	rt.handle("PATCH /api/services/{id}", classCatalogWrite, s.handleUpdateService)
+	rt.handle("DELETE /api/services/{id}", classCatalogWrite, s.handleDeleteService)
 	rt.handle("GET /api/categories", classKidFiltered, s.handleListCategories)
-	rt.handle("POST /api/categories", classAdminOnly, s.handleCreateCategory)
-	rt.handle("PUT /api/categories/order", classAdminOnly, s.handleSetCategoryOrder)
-	rt.handle("PATCH /api/categories/{id}", classAdminOnly, s.handleUpdateCategory)
-	rt.handle("DELETE /api/categories/{id}", classAdminOnly, s.handleDeleteCategory)
+	rt.handle("POST /api/categories", classCatalogWrite, s.handleCreateCategory)
+	rt.handle("PUT /api/categories/order", classCatalogWrite, s.handleSetCategoryOrder)
+	rt.handle("PATCH /api/categories/{id}", classCatalogWrite, s.handleUpdateCategory)
+	rt.handle("DELETE /api/categories/{id}", classCatalogWrite, s.handleDeleteCategory)
 	rt.handle("GET /api/services/{id}/icon/{variant}", classKidFiltered, s.handleGetIcon)
-	rt.handle("PUT /api/services/{id}/icon/{variant}", classAdminOnly, s.handlePutIcon)
-	rt.handle("DELETE /api/services/{id}/icon/{variant}", classAdminOnly, s.handleDeleteIcon)
-	rt.handle("POST /api/services/{id}/fetch-icon", classAdminOnly, s.handleFetchIcon)
+	rt.handle("PUT /api/services/{id}/icon/{variant}", classCatalogWrite, s.handlePutIcon)
+	rt.handle("DELETE /api/services/{id}/icon/{variant}", classCatalogWrite, s.handleDeleteIcon)
+	rt.handle("POST /api/services/{id}/fetch-icon", classCatalogWrite, s.handleFetchIcon)
 	rt.handle("POST /api/favorites/{id}", classKidFiltered, s.handleAddFavorite)
 	rt.handle("DELETE /api/favorites/{id}", classKidFiltered, s.handleRemoveFavorite)
 	// App Library (v9.2): browse is session-gated (any adult); CRUD, reorder
@@ -143,7 +160,7 @@ func (s *server) routes(d Deps) (http.Handler, []registeredRoute) {
 	rt.handle("PUT /api/library/order", classAdminOnly, s.handleSetLibraryOrder)
 	rt.handle("PATCH /api/library/{id}", classAdminOnly, s.handleUpdateLibraryApp)
 	rt.handle("DELETE /api/library/{id}", classAdminOnly, s.handleDeleteLibraryApp)
-	rt.handle("POST /api/library/{id}/add", classAdminOnly, s.handleAddFromLibrary)
+	rt.handle("POST /api/library/{id}/add", classCatalogWrite, s.handleAddFromLibrary)
 	rt.handle("PUT /api/layout", classKidForbidden, s.handleUpdateLayout)
 	rt.handle("GET /api/status", classKidFiltered, s.handleStatus)
 	// SPEC-v24 §12.3 — on-demand re-poll behind the health panel's "Retry now".
@@ -168,6 +185,14 @@ func (s *server) routes(d Deps) (http.Handler, []registeredRoute) {
 	rt.handle("GET /api/admin/kids/{id}/sessions", classAdminOnly, s.handleListKidSessions)
 	rt.handle("DELETE /api/admin/kids/{id}/sessions/{sid}", classAdminOnly, s.handleRevokeKidSession)
 	rt.handle("POST /api/admin/kids/{id}/sign-in-here", classAdminOnly, s.handleSignInHere)
+
+	// SPEC-household-basics §7 — invites. Making, listing and revoking are
+	// admin-only; the link's two routes are public and share one rate limit.
+	rt.handle("POST /api/admin/invites", classAdminOnly, s.handleCreateInvite)
+	rt.handle("GET /api/admin/invites", classAdminOnly, s.handleListInvites)
+	rt.handle("DELETE /api/admin/invites/{id}", classAdminOnly, s.handleRevokeInvite)
+	rt.handle("POST /api/invites/lookup", classPublic, rateLimited(s.inviteBucket, s.handleLookupInvite))
+	rt.handle("POST /api/invites/accept", classPublic, rateLimited(s.inviteBucket, s.handleAcceptInvite))
 
 	// OIDC config is always advertised so the web client can gate its
 	// "Log in with PocketID" button. The login/callback endpoints exist

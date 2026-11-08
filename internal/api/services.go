@@ -139,7 +139,7 @@ func (s *server) handleListServices(w http.ResponseWriter, r *http.Request) {
 // shared catalog model (SPEC-245-224, #224): a non-admin session gets 403. The
 // row is owned by the acting admin (the shared-catalog owner).
 func (s *server) handleCreateService(w http.ResponseWriter, r *http.Request) {
-	u, ok := s.requireAdmin(w, r)
+	owner, ok := s.requireCatalogAdmin(w, r)
 	if !ok {
 		return
 	}
@@ -171,7 +171,7 @@ func (s *server) handleCreateService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sv, err := s.store.CreateService(r.Context(), u.ID, storage.Service{
+	sv, err := s.store.CreateService(r.Context(), owner, storage.Service{
 		Slug:        in.Slug,
 		Name:        in.Name,
 		Description: in.Description,
@@ -205,7 +205,7 @@ func (s *server) handleCreateService(w http.ResponseWriter, r *http.Request) {
 // shared catalog model (SPEC-245-224, #224): a non-admin session gets 403. Body
 // fields are optional — only those present are changed.
 func (s *server) handleUpdateService(w http.ResponseWriter, r *http.Request) {
-	u, ok := s.requireAdmin(w, r)
+	owner, ok := s.requireCatalogAdmin(w, r)
 	if !ok {
 		return
 	}
@@ -231,7 +231,7 @@ func (s *server) handleUpdateService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sv, err := s.store.UpdateService(r.Context(), r.PathValue("id"), u.ID, storage.ServiceUpdate{
+	sv, err := s.store.UpdateService(r.Context(), r.PathValue("id"), owner, storage.ServiceUpdate{
 		Slug:        in.Slug,
 		Name:        in.Name,
 		Description: in.Description,
@@ -301,12 +301,12 @@ func (o *optionalString) UnmarshalJSON(b []byte) error {
 // handleDeleteService removes a shared catalog service. Admin-only under the
 // shared catalog model (SPEC-245-224, #224): a non-admin session gets 403.
 func (s *server) handleDeleteService(w http.ResponseWriter, r *http.Request) {
-	u, ok := s.requireAdmin(w, r)
+	owner, ok := s.requireCatalogAdmin(w, r)
 	if !ok {
 		return
 	}
 
-	err := s.store.DeleteService(r.Context(), r.PathValue("id"), u.ID)
+	err := s.store.DeleteService(r.Context(), r.PathValue("id"), owner)
 	if errors.Is(err, storage.ErrNotFound) {
 		http.Error(w, "no such service", http.StatusNotFound)
 		return

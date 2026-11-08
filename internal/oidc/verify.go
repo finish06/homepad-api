@@ -38,6 +38,8 @@ type idTokenClaims struct {
 	Nonce  string          `json:"nonce"`
 	Email  string          `json:"email"`
 	Groups []string        `json:"groups"`
+	// EmailVerified is the OIDC Core email_verified claim (homepad-api #89).
+	EmailVerified optionalBool `json:"email_verified"`
 }
 
 // VerifyIDToken validates a raw JWT ID token: RS256 signature against the
@@ -101,7 +103,7 @@ func (p *Provider) VerifyIDToken(ctx context.Context, raw, expectedNonce string)
 		return Claims{}, fmt.Errorf("oidc: id_token nonce mismatch")
 	}
 
-	return Claims{Email: c.Email, Groups: c.Groups}, nil
+	return Claims{Email: c.Email, Groups: c.Groups, EmailVerified: c.EmailVerified.ptr()}, nil
 }
 
 // signingKey returns the JWKS key for kid, refreshing the cached key set once
