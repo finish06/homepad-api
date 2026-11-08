@@ -50,6 +50,11 @@ type serviceView struct {
 	// has no cached result, or the latest result carried no duration, so the
 	// frontend's "state word alone" degradation holds and no number is invented.
 	ResponseTimeMs *int64 `json:"responseTimeMs,omitempty"`
+	// Widget (SPEC-status-widgets §7.2) is the tile's widget: kind, state,
+	// asOf and the chosen fields as typed values. ABSENT when the service has
+	// no enabled widget, and always absent for a kid (AC-014). It never holds
+	// the address, the username, anything about the key, or an error code.
+	Widget *tileWidgetView `json:"widget,omitempty"`
 }
 
 // validClickAction reports whether v is one of the three v23 click-action enum
@@ -109,8 +114,16 @@ func (s *server) handleListServices(w http.ResponseWriter, r *http.Request) {
 	}
 
 	snap := s.poller.Snapshot()
+	// Kids see no widget data in v1 (Q3 a): nothing to leak, by construction.
+	withWidgets := storage.IsAdultRole(u.Role)
 	out := make([]serviceView, 0, len(svcs))
 	for _, sv := range svcs {
+		var widget *tileWidgetView
+		if withWidgets {
+			if v, ok := s.widgets.View(sv.ID); ok {
+				widget = tileWidget(v)
+			}
+		}
 		out = append(out, serviceView{
 			ID:              sv.ID,
 			Slug:            sv.Slug,
@@ -130,6 +143,7 @@ func (s *server) handleListServices(w http.ResponseWriter, r *http.Request) {
 			UptimeChecks:    uptimeChecksFor(snap, sv.GatusKey),
 			UptimeWindows:   uptimeWindowsFor(snap, sv.GatusKey),
 			ResponseTimeMs:  responseTimeMsFor(snap, sv.GatusKey),
+			Widget:          widget,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"services": out})

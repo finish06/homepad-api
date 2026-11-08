@@ -62,6 +62,15 @@ stubs remain. `go test ./...` runs 26 tests green; `go vet ./...` clean.
 - **Status poller** — polls Gatus on an interval (≤30s, status `as_of` exposed)
   and serves status per service; Gatus unreachable → all `UNKNOWN`, never a 5xx.
 - **A11** — the Gatus URL is never present in any API response.
+- **Status widgets** — a few numbers on tiles (Jellyfin, Sonarr, Radarr), a
+  clock and the weather, fetched by this server and never by the browser
+  (migration `0020`, `internal/widgets`). Every request goes through one guarded
+  client: http/https only, no redirects, 5s per request, 1 MiB bodies, and no
+  link-local or cloud metadata address (checked on the resolved IP). Keys are
+  write-only and sealed with AES-256-GCM under `HOMEPAD_SECRET_KEY` (64 hex
+  characters, e.g. `openssl rand -hex 32`); without it, the API refuses to store
+  a key and keyless widgets still work. Kids get no widget data. The favicon
+  fetcher uses the same client.
 
 ### Endpoints
 
@@ -110,6 +119,23 @@ Homepage `widget`, `widgets` and `providers` values are dropped while parsing
 and never stored, logged or returned. `url` and `icon` written by these routes
 are always `http(s)` or empty. Limits: a backup up to 16 MB, each Homepage file
 up to 1 MB, at most 1,000 apps, 200 sections, 1,000 offers and 100 kids.
+
+Status widgets (SPEC-status-widgets §7):
+
+```
+GET    /api/widgets/info                        clock, weather, web search (any session, kids too)
+GET    /api/admin/widgets/kinds                 (admin) {secretKeySet, kinds: [...]}
+GET    /api/services/{id}/widget                (admin) config; the key is only `hasSecret`
+PUT    /api/services/{id}/widget                (admin) {kind, address, secret?, fields, intervalS, …}
+DELETE /api/services/{id}/widget                (admin) → 204
+POST   /api/services/{id}/widget/test           (admin) unsaved values → {ok, version, fields} | {ok:false, error}
+GET    /api/admin/geocode?q=                    (admin) place search for the weather
+```
+
+`GET /api/services` carries `widget: {kind, state, asOf, fields}` on a service
+with an enabled widget, for adults only. `PATCH /api/admin/settings` takes the
+clock, weather and web search settings and echoes them in a `widgets` block;
+`GET`/`PATCH /api/me` carry `showWidgets`.
 
 Kid names are 1–40 characters and unique among kids (case-insensitive);
 `avatarColor` is one of the frontend accent ids (`blue`, `teal`, `green`,
@@ -182,6 +208,8 @@ internal/gatus/         Gatus client + status poller
 internal/session/       session store: Postgres (production) + in-memory (tests)
 internal/storage/       Postgres access + migrations
 internal/testsupport/   test harness (httptest server, Gatus + IdP stubs)
+internal/widgets/       status widgets: guarded client, key sealer, manager, weather
+internal/widgets/providers/  Jellyfin, Sonarr, Radarr
 migrations/             SQL migrations
 ```
 

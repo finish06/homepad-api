@@ -15,6 +15,8 @@ import (
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/oidc"
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/session"
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/storage"
+	"gitea.kube.calebdunn.tech/code/homepad-api/internal/widgets"
+	"gitea.kube.calebdunn.tech/code/homepad-api/internal/widgets/providers"
 )
 
 func main() {
@@ -112,6 +114,36 @@ func main() {
 		sweepInvites(ctx, store, session.SweepInterval)
 	}()
 
+	// Status widgets (SPEC-status-widgets). HOMEPAD_SECRET_KEY seals widget
+	// keys at rest; without it, widgets that need no key still work and the
+	// API refuses to store one. The value is never logged — not even when it
+	// is malformed.
+	sealer, err := widgets.ParseSecretKey(os.Getenv(widgets.SecretKeyEnv))
+	if err != nil {
+		log.Printf("warning: %v", err)
+	} else if sealer == nil {
+		log.Printf("%s is unset: widget keys can't be saved (clock, weather and search still work)", widgets.SecretKeyEnv)
+	}
+	outbound := widgets.NewClient()
+	widgetKinds := providers.Default()
+	widgetManager := widgets.NewManager(widgets.ManagerOptions{
+		Source: api.NewWidgetSource(store), Registry: widgetKinds, Client: outbound, Sealer: sealer, Logf: log.Printf,
+	})
+	weather := widgets.NewWeather(widgets.WeatherOptions{
+		Client: outbound, Logf: log.Printf,
+		Load: func(ctx context.Context) (widgets.WeatherSettings, error) { return api.LoadWeatherSettings(ctx, store) },
+	})
+	go func() {
+		if err := widgetManager.Run(ctx); err != nil && err != context.Canceled {
+			log.Printf("widgets stopped: %v", err)
+		}
+	}()
+	go func() {
+		if err := weather.Run(ctx); err != nil && err != context.Canceled {
+			log.Printf("weather stopped: %v", err)
+		}
+	}()
+
 	h := api.New(api.Deps{
 		Store:        store,
 		Poller:       poller,
@@ -119,6 +151,11 @@ func main() {
 		Registration: regMode,
 		OIDC:         oidc.ConfigFromEnv(),
 		MaxAccounts:  maxAccounts,
+		Widgets:      widgetManager,
+		Weather:      weather,
+		Sealer:       sealer,
+		WidgetKinds:  widgetKinds,
+		Outbound:     outbound,
 	})
 
 	srv := &http.Server{Addr: ":" + envOr("PORT", "8080"), Handler: h}

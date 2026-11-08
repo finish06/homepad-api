@@ -90,14 +90,14 @@ type User struct {
 // "": a kid reads back with no email and an empty hash, which bcrypt can never
 // match.
 const userColumns = `id, COALESCE(email, ''), COALESCE(password_hash, ''), role, theme_pref, density_pref,
-	show_health_bar, show_uptime_display, COALESCE(display_name, ''), COALESCE(avatar_color, '')`
+	show_health_bar, show_uptime_display, COALESCE(display_name, ''), COALESCE(avatar_color, ''), show_widgets`
 
 // scanUser scans a row selected with userColumns first; extra receives any
 // columns selected after them.
 func scanUser(row pgx.Row, extra ...any) (User, error) {
 	var u User
 	dest := append([]any{&u.ID, &u.Email, &u.PasswordHash, &u.Role, &u.ThemePref, &u.DensityPref,
-		&u.ShowHealthBar, &u.ShowUptimeDisplay, &u.DisplayName, &u.AvatarColor}, extra...)
+		&u.ShowHealthBar, &u.ShowUptimeDisplay, &u.DisplayName, &u.AvatarColor, &u.ShowWidgets}, extra...)
 	err := row.Scan(dest...)
 	return u, err
 }

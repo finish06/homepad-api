@@ -29,12 +29,17 @@ func widgetStore(t *testing.T) (*storage.Store, *pgx.Conn, string) {
 	require.NoError(t, store.Migrate(ctx))
 	conn, err := pgx.Connect(ctx, dsn)
 	require.NoError(t, err)
-	t.Cleanup(func() { conn.Close(ctx) })
 	_, err = conn.Exec(ctx, `TRUNCATE categories, users, system_settings CASCADE`)
 	require.NoError(t, err)
+	// Leave no admin behind: other tests in this package treat the first
+	// admin they create as the shared-catalog owner.
+	t.Cleanup(func() {
+		_, _ = conn.Exec(ctx, `TRUNCATE categories, users, system_settings CASCADE`)
+		conn.Close(ctx)
+	})
 	var admin string
 	require.NoError(t, conn.QueryRow(ctx,
-		`INSERT INTO users (email, password_hash, role) VALUES ('w20@example.com', 'h', 'admin') RETURNING id`).Scan(&admin))
+		`INSERT INTO users (email, password_hash, role, show_uptime_display) VALUES ('w20@example.com', 'h', 'admin', TRUE) RETURNING id`).Scan(&admin))
 	return store, conn, admin
 }
 
