@@ -90,6 +90,27 @@ DELETE /api/admin/kids/{id}/sessions/{sid}      → 204 (the device's next reque
 POST   /api/admin/kids/{id}/sign-in-here        ends the admin's session, sets the kid's → 204
 ```
 
+Backup, restore and Homepage import (all admin-only; SPEC-backup-import):
+
+```
+GET    /api/admin/export?people=true|false            the backup file (JSON, schema v1)
+POST   /api/admin/restore/preview?mode=merge|replace  body: the backup → Plan
+POST   /api/admin/restore?mode=…&plan={planHash}      same body → Result, or 409 + new Plan
+POST   /api/admin/import/homepage/preview             {services, bookmarks?, settings?} → Plan
+POST   /api/admin/import/homepage?plan={planHash}     same body → Result, or 409 + new Plan
+```
+
+A preview changes nothing. An apply re-plans inside one transaction holding an
+advisory lock, refuses with 409 when the plan changed since the preview, and
+writes everything or nothing. Every write lands in the shared catalog owner's
+rows, whichever admin runs it. A backup holds no ids, password hashes,
+sessions, OIDC or env config, or the Gatus URL; its JSON Schema is
+[`docs/schema/homepad-backup-v1.json`](docs/schema/homepad-backup-v1.json).
+Homepage `widget`, `widgets` and `providers` values are dropped while parsing
+and never stored, logged or returned. `url` and `icon` written by these routes
+are always `http(s)` or empty. Limits: a backup up to 16 MB, each Homepage file
+up to 1 MB, at most 1,000 apps, 200 sections, 1,000 offers and 100 kids.
+
 Kid names are 1–40 characters and unique among kids (case-insensitive);
 `avatarColor` is one of the frontend accent ids (`blue`, `teal`, `green`,
 `yellow`, `orange`, `red`, `pink`, `purple`; default `blue`). A session `id` is

@@ -634,9 +634,19 @@ func TestTransfer_Refusals(t *testing.T) {
 	// A body over 16 MB is a 413.
 	big := append([]byte(`{"format":"homepad-backup","schemaVersion":1,"pad":"`), bytes.Repeat([]byte("x"), 16<<20)...)
 	big = append(big, []byte(`"}`)...)
-	code, b := postRaw(t, env.URL+"/api/admin/restore/preview?mode=merge", "admin-session", big)
-	assert.Equal(t, http.StatusRequestEntityTooLarge, code)
+	// Expect: 100-continue lets the server refuse before the client sends
+	// 16 MB, so the response can't be lost to a reset connection.
+	req, err := http.NewRequest(http.MethodPost, env.URL+"/api/admin/restore/preview?mode=merge", bytes.NewReader(big))
+	require.NoError(t, err)
+	req.Header.Set("Expect", "100-continue")
+	req.AddCookie(&http.Cookie{Name: "homepad_session", Value: "admin-session"})
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	b, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	assert.Equal(t, http.StatusRequestEntityTooLarge, resp.StatusCode)
 	assert.Equal(t, "too_large", decodeAs[tError](t, b).Code)
+	var code int
 
 	// A Homepage file over 1 MB is a 413; a bad one is a 400/422 with a line.
 	code, b = postRaw(t, env.URL+"/api/admin/import/homepage/preview", "admin-session",

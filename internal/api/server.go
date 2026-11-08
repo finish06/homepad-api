@@ -198,6 +198,13 @@ func (s *server) routes(d Deps) (http.Handler, []registeredRoute) {
 	rt.handle("POST /api/invites/lookup", classPublic, rateLimited(s.inviteBucket, s.handleLookupInvite))
 	rt.handle("POST /api/invites/accept", classPublic, rateLimited(s.inviteBucket, s.handleAcceptInvite))
 
+	// SPEC-backup-import §8 — backup, restore and Homepage import.
+	rt.handle("GET /api/admin/export", classAdminOnly, s.handleExport)
+	rt.handle("POST /api/admin/restore/preview", classAdminOnly, s.handleRestorePreview)
+	rt.handle("POST /api/admin/restore", classAdminOnly, s.handleRestore)
+	rt.handle("POST /api/admin/import/homepage/preview", classAdminOnly, s.handleImportPreview)
+	rt.handle("POST /api/admin/import/homepage", classAdminOnly, s.handleImport)
+
 	// OIDC config is always advertised so the web client can gate its
 	// "Log in with PocketID" button. The login/callback endpoints exist
 	// only when OIDC is enabled — otherwise they stay unregistered (404)

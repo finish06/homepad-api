@@ -23,6 +23,11 @@ import (
 
 var exportTime = time.Date(2026, 11, 7, 18, 4, 11, 0, time.UTC)
 
+var (
+	etagA = strings.Repeat("a", 64)
+	etagB = strings.Repeat("b", 64)
+)
+
 // populatedState is a catalog with every field set, uploaded icons, offers,
 // settings, adults and a kid. Every id is a UUID, so a test can grep the file
 // for ids.
@@ -43,7 +48,7 @@ func populatedState() *storage.TransferState {
 			{ID: jelly, Slug: "jellyfin", Name: "Jellyfin", Description: "Movies and TV", URL: "https://jellyfin.example.com",
 				Icon: "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/jellyfin.png", GatusKey: "media_jellyfin",
 				ClickAction: "new_tab", SectionID: &media, SourceLibraryID: &offer,
-				Icons: []storage.TransferIcon{{Variant: "light", ETag: "aa", Bytes: []byte("light-png")}, {Variant: "dark", ETag: "bb", Bytes: []byte("dark-png")}}},
+				Icons: []storage.TransferIcon{{Variant: "light", ETag: etagA, Bytes: []byte("light-png")}, {Variant: "dark", ETag: etagB, Bytes: []byte("dark-png")}}},
 			{ID: router, Slug: "router", Name: "Router", URL: "http://192.0.2.1", ClickAction: "same_tab"},
 			{ID: sonarr, Slug: "sonarr", Name: "Sonarr", URL: "https://sonarr.home.arpa", ClickAction: "iframe", SectionID: &media},
 		},
@@ -116,8 +121,8 @@ func TestBackup_HoldsTheWholeCatalog(t *testing.T) {
 	require.NotNil(t, j.UploadedIcons.Light)
 	require.NotNil(t, j.UploadedIcons.Dark)
 	assert.Equal(t, "bGlnaHQtcG5n", j.UploadedIcons.Light.PNG, "base64 of the bytes")
-	assert.Equal(t, "aa", j.UploadedIcons.Light.SHA256)
-	assert.Equal(t, "bb", j.UploadedIcons.Dark.SHA256)
+	assert.Equal(t, etagA, j.UploadedIcons.Light.SHA256)
+	assert.Equal(t, etagB, j.UploadedIcons.Dark.SHA256)
 	r := f.Apps[1]
 	assert.Nil(t, r.Section, "Uncategorized is null")
 	assert.Nil(t, r.GatusKey, "unmonitored is null")

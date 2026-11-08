@@ -162,7 +162,7 @@ func TestHomepage_SyntaxErrorIs400WithLine(t *testing.T) {
 	assert.Equal(t, "services", err.File)
 	assert.Greater(t, err.Line, 0)
 
-	err = parseErr(t, transfer.HomepageInput{Services: "- Media: [ok]\n", Settings: "title: a\n  bad: indent\n"})
+	err = parseErr(t, transfer.HomepageInput{Services: "- Media: []\n", Settings: "title: a\n  bad: indent\n"})
 	assert.Equal(t, transfer.CodeYAMLSyntax, err.Code)
 	assert.Equal(t, "settings", err.File)
 	assert.Equal(t, 2, err.Line)
