@@ -14,8 +14,9 @@ import (
 // shared catalog owner's (AC-025, homepad-api#87), whichever admin runs it.
 
 // importLockKey is the advisory lock that serializes restore and import
-// applies (AC-009). It is distinct from migrateLockKey.
-const importLockKey = 0x686f6d6570616432 // "homepad2"
+// applies (AC-009). Distinct from migrateLockKey and accountsLockKey
+// (locks_internal_test.go checks).
+const importLockKey = 0x686f6d6570616433 // "homepad3"
 
 // TransferState is everything the planner needs to know about the install.
 type TransferState struct {
@@ -107,6 +108,9 @@ type TransferLoad struct {
 	CallerID  string
 	People    bool // per-person state for every account
 	IconBytes bool // icon bytes (export only)
+	// AccountLimit is HOMEPAD_MAX_ACCOUNTS (0 = no limit), carried into the
+	// state for the planner.
+	AccountLimit int
 }
 
 // TransferAppRow is the full desired state of an app on create or update.
@@ -234,6 +238,10 @@ func loadTransferState(ctx context.Context, q querier, in TransferLoad) (*Transf
 	if err := q.QueryRow(ctx, `SELECT count(*) FROM users WHERE id::text <> $1`, in.CallerID).Scan(&st.OtherAccounts); err != nil {
 		return nil, fmt.Errorf("storage: transfer accounts: %w", err)
 	}
+	st.AccountLimit = in.AccountLimit
+	if err := q.QueryRow(ctx, countAccountsSQL).Scan(&st.Accounts); err != nil {
+		return nil, fmt.Errorf("storage: transfer account count: %w", err)
+	}
 	if in.People {
 		if err := loadTransferPeople(ctx, q, st, appIdx); err != nil {
 			return nil, fmt.Errorf("storage: transfer people: %w", err)
@@ -320,27 +328,33 @@ func collect(ctx context.Context, q querier, sql string, args []any, fn func(pgx
 	return rows.Err()
 }
 
-// TransferTx is one apply: a transaction holding importLockKey. It
-// implements transfer.Writer.
+// TransferTx is one apply: a transaction holding importLockKey and
+// accountsLockKey. It implements transfer.Writer.
 type TransferTx struct {
-	tx pgx.Tx
+	tx           pgx.Tx
+	accountLimit int
 }
 
 // InTransferTx runs fn in one transaction holding the import advisory lock,
-// so two applies never interleave (AC-009). The lock is taken first, and the
-// transaction is READ COMMITTED, so a waiting apply reads the first one's
-// result once it gets the lock. fn's error rolls everything back and is
-// returned as is.
-func (s *Store) InTransferTx(ctx context.Context, fn func(tx *TransferTx) error) error {
+// so two applies never interleave (AC-009), and then the account lock, so the
+// account count the plan was made from can't move until commit
+// (SPEC-household-basics AC-028/AC-029). The locks are always taken in that
+// order, and the account paths never take the import lock, so they can't
+// deadlock. The transaction is READ COMMITTED, so a waiting apply reads the
+// first one's result once it gets the locks. fn's error rolls everything back
+// and is returned as is.
+func (s *Store) InTransferTx(ctx context.Context, accountLimit int, fn func(tx *TransferTx) error) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, int64(importLockKey)); err != nil {
-		return fmt.Errorf("storage: acquire import lock: %w", err)
+	for _, key := range []int64{importLockKey, accountsLockKey} {
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, key); err != nil {
+			return fmt.Errorf("storage: acquire transfer locks: %w", err)
+		}
 	}
-	if err := fn(&TransferTx{tx: tx}); err != nil {
+	if err := fn(&TransferTx{tx: tx, accountLimit: accountLimit}); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -469,22 +483,18 @@ func (t *TransferTx) SetSettings(ctx context.Context, in SystemSettings) error {
 	return nil
 }
 
-// CreateKid creates a kid the way the Accounts API does: no email, no
-// password, no session.
+// CreateKid creates a kid the way the Accounts API does (insertKid): no
+// email, no password, no session, and never past the account cap. The plan
+// already left out kids past the cap; this is the backstop.
 func (t *TransferTx) CreateKid(ctx context.Context, name, avatarColor string) (string, error) {
-	var id string
-	err := t.tx.QueryRow(ctx, `INSERT INTO users (email, password_hash, role, display_name, avatar_color,
-		                    show_health_bar, density_pref, show_uptime_display)
-		VALUES (NULL, NULL, 'kid', $1, $2, FALSE, 'large',
-		        COALESCE((SELECT show_uptime_display FROM system_settings WHERE id = 1), TRUE))
-		RETURNING id`, name, avatarColor).Scan(&id)
-	if isUniqueViolation(err, "users_kid_name_key") {
-		return "", ErrKidNameTaken
+	if err := checkLimit(ctx, t.tx, t.accountLimit); err != nil {
+		return "", err
 	}
+	u, err := insertKid(ctx, t.tx, name, avatarColor)
 	if err != nil {
-		return "", fmt.Errorf("storage: transfer create kid: %w", err)
+		return "", err
 	}
-	return id, nil
+	return u.ID, nil
 }
 
 // SetPerson sets a person's appearance and avatar; an adult's display name

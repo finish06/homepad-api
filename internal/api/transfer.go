@@ -233,7 +233,7 @@ func (s *server) previewOrApply(w http.ResponseWriter, r *http.Request, u storag
 	if !ok {
 		return
 	}
-	load.OwnerID, load.CallerID = owner, u.ID
+	load.OwnerID, load.CallerID, load.AccountLimit = owner, u.ID, s.maxAccounts
 	if !apply {
 		st, err := s.store.LoadTransferState(r.Context(), load)
 		if err != nil {
@@ -246,7 +246,7 @@ func (s *server) previewOrApply(w http.ResponseWriter, r *http.Request, u storag
 	}
 
 	var applied *transfer.Plan
-	err := s.store.InTransferTx(r.Context(), func(tx *storage.TransferTx) error {
+	err := s.store.InTransferTx(r.Context(), s.maxAccounts, func(tx *storage.TransferTx) error {
 		st, err := tx.LoadState(r.Context(), load)
 		if err != nil {
 			return err
@@ -272,6 +272,13 @@ func (s *server) previewOrApply(w http.ResponseWriter, r *http.Request, u storag
 				Message: "Your dashboard changed since the preview. Here's the new one."},
 			Plan: changed.plan,
 		})
+		return
+	}
+	if errors.Is(err, storage.ErrAccountLimit) {
+		// The plan leaves out kids past the cap, so only a cap lowered under
+		// a running apply lands here.
+		writeTransferError(w, &transfer.Error{Status: http.StatusConflict, Code: transfer.ReasonAccountLimit,
+			Message: accountLimitMessage(s.maxAccounts)})
 		return
 	}
 	if err != nil {

@@ -894,6 +894,12 @@ func planPeople(p *Plan, o *ops, st *storage.TransferState, ppl *People, curApps
 		p.add(it)
 	}
 
+	// HOMEPAD_MAX_ACCOUNTS (SPEC-household-basics AC-029): room for this
+	// many new kids; -1 is no limit.
+	room := -1
+	if st.AccountLimit > 0 {
+		room = max(st.AccountLimit-st.Accounts, 0)
+	}
 	seenKid := map[string]bool{}
 	for _, k := range ppl.Kids {
 		name, ok := kidName(k.Name)
@@ -920,7 +926,14 @@ func planPeople(p *Plan, o *ops, st *storage.TransferState, ppl *People, curApps
 			it.Warnings = append(it.Warnings, WarnRefMissing)
 		}
 		cur, exists := kids[key]
+		if !exists && room == 0 {
+			p.add(skip(KindKid, name, ReasonAccountLimit))
+			continue
+		}
 		if !exists {
+			if room > 0 {
+				room--
+			}
 			color := deref(k.AvatarColor)
 			if color == "" {
 				color = "blue"
