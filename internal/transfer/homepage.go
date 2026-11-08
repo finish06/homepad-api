@@ -181,12 +181,8 @@ func loadYAML(file, text string) (*yaml.Node, *Error) {
 		return nil, nil
 	}
 	if err != nil {
-		msg := strings.TrimPrefix(err.Error(), "yaml: ")
-		if m := yamlLineRe.FindStringSubmatch(msg); m != nil {
-			line, _ := strconv.Atoi(m[1])
-			return nil, syntaxErr(file, line, m[2])
-		}
-		return nil, syntaxErr(file, 0, msg)
+		hint, detail := yamlErrorParts(err)
+		return nil, syntaxErr(file, refineLine(text, hint, detail), detail)
 	}
 	visits := 0
 	var walk func(n *yaml.Node) *Error
@@ -222,6 +218,37 @@ func loadYAML(file, text string) (*yaml.Node, *Error) {
 		return nil, nil
 	}
 	return root, nil
+}
+
+// yamlErrorParts splits a yaml.v3 error into its line (0 when it names
+// none) and its detail.
+func yamlErrorParts(err error) (int, string) {
+	msg := strings.TrimPrefix(err.Error(), "yaml: ")
+	if m := yamlLineRe.FindStringSubmatch(msg); m != nil {
+		line, _ := strconv.Atoi(m[1])
+		return line, m[2]
+	}
+	return 0, msg
+}
+
+// refineLine turns yaml.v3's line into the line the problem is on. yaml.v3
+// reports a parser error at the line before (its context mark, 0-based) and
+// gives no line for line 1. So: the first of hint and hint+1 whose prefix of
+// the file fails with the same detail is the line. Two prefix parses at most,
+// so a 1 MB file stays cheap.
+func refineLine(text string, hint int, detail string) int {
+	lines := strings.SplitAfter(text, "\n")
+	for l := max(hint, 1); l <= hint+1 && l <= len(lines); l++ {
+		var n yaml.Node
+		err := yaml.NewDecoder(strings.NewReader(strings.Join(lines[:l], ""))).Decode(&n)
+		if err == nil {
+			continue
+		}
+		if _, d := yamlErrorParts(err); d == detail {
+			return l
+		}
+	}
+	return max(hint, 1)
 }
 
 // safeTag keeps a tag short and printable for the message.
