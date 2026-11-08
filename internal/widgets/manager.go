@@ -430,7 +430,25 @@ func (m *Manager) fetchOnce(ctx context.Context, cfg Stored, st *State, mode fet
 	if err != nil {
 		return nil, "", CodeOf(err)
 	}
-	return chosen(p, fields, res), res.Version, ""
+	return chosen(p, fields, res), cleanVersion(res.Version), ""
+}
+
+// cleanVersion keeps an upstream version string only if it looks like one
+// (at most 40 of [0-9A-Za-z.+_-]); anything else becomes "". It is the one
+// piece of upstream text a Test connection returns (AC-019).
+func cleanVersion(v string) string {
+	v = strings.TrimSpace(v)
+	if v == "" || len(v) > 40 {
+		return ""
+	}
+	for _, r := range v {
+		ok := (r >= '0' && r <= '9') || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+			r == '.' || r == '+' || r == '_' || r == '-'
+		if !ok {
+			return ""
+		}
+	}
+	return v
 }
 
 // chosen lists the chosen fields the app answered, in provider order.

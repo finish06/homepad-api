@@ -579,3 +579,14 @@ func TestStored_AddressAndOrigin(t *testing.T) {
 	assert.Equal(t, Origin("https://a.example.com"), Origin("https://a.example.com:443/other"))
 	assert.NotEqual(t, Origin("https://a.example.com"), Origin("http://a.example.com"))
 }
+
+// AC-019 — the version is the one piece of upstream text a test returns, so
+// it is reduced to a short, plain version string.
+func TestCleanVersion(t *testing.T) {
+	assert.Equal(t, "10.10.3", cleanVersion("10.10.3"))
+	assert.Equal(t, "4.0.11.2680-develop", cleanVersion(" 4.0.11.2680-develop\n"))
+	assert.Equal(t, "", cleanVersion("<script>alert(1)</script>"))
+	assert.Equal(t, "", cleanVersion("v1 with spaces"))
+	assert.Len(t, cleanVersion(strings.Repeat("1", 500)), 0)
+	assert.Equal(t, "1.2.3+build", cleanVersion("1.2.3+build"))
+}
