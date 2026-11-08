@@ -11,7 +11,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"strings"
 	"syscall"
 	"time"
 )
@@ -350,9 +349,6 @@ func mapTransportError(ctx context.Context, err error) error {
 	var ne net.Error
 	if errors.As(err, &ne) && ne.Timeout() {
 		return ErrTimeout
-	}
-	if strings.Contains(err.Error(), "tls:") {
-		return ErrTLS
 	}
 	return ErrUnreachable
 }

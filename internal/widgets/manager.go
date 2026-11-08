@@ -378,27 +378,31 @@ func (m *Manager) fetch(ctx context.Context, serviceID string) {
 		return
 	}
 
-	fields, code := m.run(ctx, cfg, st, false, "")
+	fields, _, code := m.fetchOnce(ctx, cfg, st, fetchScheduled, "", nil)
 	m.finish(serviceID, gen, fields, code, true)
 	if code != "" {
 		m.logf("widget %s (%s): %s", serviceID, cfg.Kind, code)
 	}
 }
 
-// run performs one provider fetch for cfg and returns the chosen fields in
-// provider order, or a code. secretOverride, when set (Test connection), is
-// used instead of the stored key.
-func (m *Manager) run(ctx context.Context, cfg Stored, st *State, test bool, secretOverride string) ([]FieldValue, Code) {
-	fv, _, code := m.runWithVersion(ctx, cfg, st, test, secretOverride, nil)
-	return fv, code
-}
+type fetchMode int
 
-func (m *Manager) runWithVersion(ctx context.Context, cfg Stored, st *State, test bool, secretOverride string, base *url.URL) ([]FieldValue, string, Code) {
+const (
+	fetchScheduled fetchMode = iota // the stored key, the stored address
+	fetchTest                       // Test connection: the form's key and address, plus the version
+)
+
+// fetchOnce performs one provider fetch for cfg and returns the chosen fields
+// in provider order and the version (tests only), or a code. A scheduled
+// fetch decrypts the stored key just before the call; a test uses the
+// plaintext key and base URL the handler resolved from the form.
+func (m *Manager) fetchOnce(ctx context.Context, cfg Stored, st *State, mode fetchMode, testSecret string, base *url.URL) ([]FieldValue, string, Code) {
 	p, ok := m.reg.Get(cfg.Kind)
 	if !ok {
 		return nil, "", CodeBadResponse
 	}
-	secret := secretOverride
+	test := mode == fetchTest
+	secret := testSecret
 	if !test && cfg.SecretCiphertext != nil {
 		plain, err := m.sealer.Open(cfg.SecretCiphertext, cfg.SecretNonce, cfg.SecretAAD())
 		if err != nil {
@@ -567,7 +571,7 @@ func (m *Manager) Test(ctx context.Context, serviceID string, in TestInput) ([]F
 	l.Lock()
 	defer l.Unlock()
 	cfg := Stored{ServiceID: serviceID, Kind: in.Kind, Username: in.Username, Fields: in.Fields, InsecureTLS: in.InsecureTLS}
-	fields, version, code := m.runWithVersion(ctx, cfg, &State{}, true, in.Secret, in.BaseURL)
+	fields, version, code := m.fetchOnce(ctx, cfg, &State{}, fetchTest, in.Secret, in.BaseURL)
 	if code != "" {
 		return nil, "", &Error{Code: code}
 	}

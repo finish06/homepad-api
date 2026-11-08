@@ -759,3 +759,45 @@ func newFakeOpenMeteo(t *testing.T) *fakeOpenMeteoSrv {
 	t.Cleanup(f.Close)
 	return f
 }
+
+// §6.4 — HOMEPAD_SECRET_KEY is a credential: it is not on the env-config
+// allow-list, so the admin env view never shows it.
+func TestWidgets_SecretKeyNotInEnvConfig(t *testing.T) {
+	t.Setenv("HOMEPAD_SECRET_KEY", testsupport.TestSecretKey)
+	env := testsupport.NewEnv(t)
+	code, b := (&calls{t: t, base: env.URL}).do(http.MethodGet, "/api/admin/env-config", "admin-session", nil)
+	require.Equal(t, http.StatusOK, code)
+	assert.NotContains(t, string(b), "HOMEPAD_SECRET_KEY")
+	assert.NotContains(t, string(b), testsupport.TestSecretKey)
+}
+
+// AC-016 — GET /api/services reads the manager's snapshot: an upstream that
+// hangs can't slow it down or fail it.
+func TestWidgets_ServicesNeverWaitOnAnUpstream(t *testing.T) {
+	release := make(chan struct{})
+	hung := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	}))
+	defer hung.Close()
+
+	env := testsupport.NewEnv(t)
+	id := env.SeedService(t, "sonarr", "Sonarr", "")
+	c := &calls{t: t, base: env.URL}
+	code, _ := c.do(http.MethodPut, "/api/services/"+id+"/widget", "admin-session", widgetBody(hung.URL, map[string]any{"secret": arrKey}))
+	require.Equal(t, http.StatusOK, code)
+	done := make(chan struct{})
+	go func() { env.Widgets.RefreshNow(context.Background(), id); close(done) }()
+
+	start := time.Now()
+	code, b := c.do(http.MethodGet, "/api/services", "admin-session", nil)
+	require.Equal(t, http.StatusOK, code)
+	assert.Less(t, time.Since(start), time.Second, "the list doesn't wait for the fetch")
+	w, ok := serviceWidget(t, b, id)
+	require.True(t, ok)
+	assert.Equal(t, "loading", w["state"])
+	close(release)
+	<-done
+}
