@@ -54,6 +54,7 @@ const (
 	ReasonInvalidItem    = "invalid_item"
 	ReasonAdultNoAccount = "adult_no_account"
 	ReasonIconInvalid    = "icon_invalid"
+	ReasonAccountLimit   = "account_limit"
 )
 
 // Warnings.

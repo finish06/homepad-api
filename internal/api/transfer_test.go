@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -175,32 +174,7 @@ func countRows(t *testing.T, env *testsupport.Env, sql string, args ...any) int 
 	return n
 }
 
-// captureLog sends the standard logger to a buffer for the rest of the test.
-func captureLog(t *testing.T) *syncBuffer {
-	t.Helper()
-	buf := &syncBuffer{}
-	prev := log.Writer()
-	log.SetOutput(buf)
-	t.Cleanup(func() { log.SetOutput(prev) })
-	return buf
-}
-
-type syncBuffer struct {
-	mu sync.Mutex
-	b  bytes.Buffer
-}
-
-func (s *syncBuffer) Write(p []byte) (int, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.b.Write(p)
-}
-
-func (s *syncBuffer) String() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.b.String()
-}
+// captureLog (household_signup_test.go) captures the standard logger.
 
 func seedAdult(t *testing.T, env *testsupport.Env, email string) string {
 	t.Helper()
@@ -781,4 +755,31 @@ func listAccountsRaw(t *testing.T, env *testsupport.Env) []rawAccount {
 	var list []rawAccount
 	require.NoError(t, json.Unmarshal(b, &list))
 	return list
+}
+
+// SPEC-household-basics AC-029 — a restore can't create kids past
+// HOMEPAD_MAX_ACCOUNTS: the preview skips them, and the apply holds the
+// account lock so the count can't move under it.
+func TestTransfer_RestoreRespectsTheAccountCap(t *testing.T) {
+	// The fixture seeds 3 adults; a cap of 4 leaves room for one kid.
+	env := testsupport.NewEnvWith(t, testsupport.Options{MaxAccounts: 4})
+	file := fixtureBytes(t, "backups/v1.json")
+	var f map[string]any
+	require.NoError(t, json.Unmarshal(file, &f))
+	people := f["people"].(map[string]any)
+	people["kids"] = append(people["kids"].([]any), map[string]any{"name": "Leo"})
+	file, _ = json.Marshal(f)
+
+	p := previewRestore(t, env.URL, "admin-session", "merge", file)
+	assert.Equal(t, 1, p.Summary.Create["kids"])
+	var reasons []string
+	for _, it := range p.Items {
+		if it.Kind == "kid" && it.Action == "skip" {
+			reasons = append(reasons, it.Name+":"+it.Reason)
+		}
+	}
+	assert.Equal(t, []string{"Leo:account_limit"}, reasons)
+	code, b := applyRestore(t, env.URL, "admin-session", "merge", p.PlanHash, file)
+	require.Equal(t, http.StatusOK, code, "%s", b)
+	assert.Equal(t, 4, countRows(t, env, `SELECT count(*) FROM users`))
 }

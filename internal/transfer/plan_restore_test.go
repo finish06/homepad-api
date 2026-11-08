@@ -455,3 +455,22 @@ func TestRestore_PlanHashTracksTheCatalog(t *testing.T) {
 	st.Apps = []storage.TransferApp{{ID: "app-x", Slug: "sonarr", Name: "Sonarr", URL: "https://elsewhere.example.com", ClickAction: "new_tab"}}
 	assert.NotEqual(t, a.PlanHash, restorePlan(t, st, d, transfer.ModeMerge).PlanHash)
 }
+
+// SPEC-household-basics AC-029 — a restore never passes HOMEPAD_MAX_ACCOUNTS.
+// Kids past the limit are skipped, with a reason, in the preview.
+func TestRestore_KidsRespectTheAccountLimit(t *testing.T) {
+	f := decodeFixture(t).File
+	f.People.Kids = append(f.People.Kids, transfer.Kid{Name: "Leo"}, transfer.Kid{Name: "Ada"})
+	st := freshState()
+	st.AccountLimit, st.Accounts = 3, 2
+	p := restorePlan(t, st, decodeFile(t, f), transfer.ModeMerge)
+	assert.Equal(t, 1, p.Summary.Create.Kids)
+	assert.Equal(t, transfer.ActionCreate, item(t, p, transfer.KindKid, "Maya").Action)
+	assert.Equal(t, transfer.ReasonAccountLimit, item(t, p, transfer.KindKid, "Leo").Reason)
+	assert.Equal(t, transfer.ReasonAccountLimit, item(t, p, transfer.KindKid, "Ada").Reason)
+
+	st.AccountLimit = 0
+	assert.Equal(t, 3, restorePlan(t, st, decodeFile(t, f), transfer.ModeMerge).Summary.Create.Kids, "0 is no limit")
+	st.AccountLimit, st.Accounts = 3, 5
+	assert.Equal(t, 0, restorePlan(t, st, decodeFile(t, f), transfer.ModeMerge).Summary.Create.Kids, "already over")
+}

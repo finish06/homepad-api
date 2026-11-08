@@ -34,6 +34,11 @@ type TransferState struct {
 	CallerOrder []string
 	// OtherAccounts counts accounts other than the caller.
 	OtherAccounts int
+	// AccountLimit is HOMEPAD_MAX_ACCOUNTS (0 = no limit) and Accounts what
+	// it counts (every account plus pending invites), so a restore never
+	// creates a kid past the cap (SPEC-household-basics AC-029).
+	AccountLimit int
+	Accounts     int
 }
 
 // TransferSection is one category of the shared catalog.
