@@ -114,11 +114,12 @@ func shapeErr(file string, line int) *Error {
 }
 
 func syntaxErr(file string, line int, detail string) *Error {
-	msg := "There's a problem in this file: " + detail
+	detail = strings.TrimSuffix(strings.TrimSpace(detail), ".")
+	msg := "There's a problem in this file: " + detail + "."
 	if line > 0 {
-		msg = fmt.Sprintf("There's a problem on line %d: %s.", line, strings.TrimSuffix(detail, "."))
+		msg = fmt.Sprintf("There's a problem on line %d: %s.", line, detail)
 	}
-	return &Error{Status: http.StatusBadRequest, Code: CodeYAMLSyntax, Message: msg, File: file, Line: line}
+	return &Error{Status: http.StatusBadRequest, Code: CodeYAMLSyntax, Message: msg, File: file, Line: line, Detail: detail}
 }
 
 // ParseHomepage parses the three files. services is required; bookmarks and
@@ -365,14 +366,14 @@ func (p *hpParser) services(root *yaml.Node) *Error {
 	}
 	for _, g := range groups {
 		name := strings.TrimSpace(g.key)
-		if err := p.serviceGroup(name, name, name, g.val, g.line, 1); err != nil {
+		if err := p.serviceGroup(name, name, g.val, g.line, 1); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (p *hpParser) serviceGroup(path, root, label string, val *yaml.Node, line, depth int) *Error {
+func (p *hpParser) serviceGroup(path, root string, val *yaml.Node, line, depth int) *Error {
 	if depth > MaxGroupDepth {
 		return &Error{Status: http.StatusUnprocessableEntity, Code: CodeTooDeep,
 			Message: fmt.Sprintf("Groups are nested more than %d deep.", MaxGroupDepth), File: fileServices, Line: line}
@@ -396,7 +397,7 @@ func (p *hpParser) serviceGroup(path, root, label string, val *yaml.Node, line, 
 		}
 		name, body := strings.TrimSpace(ps[0].key), resolve(ps[0].val)
 		if body != nil && body.Kind == yaml.SequenceNode {
-			if err := p.serviceGroup(path+" / "+name, root, name, body, ps[0].line, depth+1); err != nil {
+			if err := p.serviceGroup(path+" / "+name, root, body, ps[0].line, depth+1); err != nil {
 				return err
 			}
 			continue
@@ -405,12 +406,13 @@ func (p *hpParser) serviceGroup(path, root, label string, val *yaml.Node, line, 
 			return err
 		}
 		entry := HomepageEntry{Section: path, Name: name, Line: ps[0].line}
+		// Homepage's default weight is the entry's position among the
+		// group's services × 100; an entry it can't read doesn't count.
 		weight := (sec.counter + 1) * 100
 		if body == nil || body.Kind != yaml.MappingNode {
 			entry.NoFields = true
 		} else {
 			sec.counter++
-			weight = (sec.counter) * 100
 			for _, f := range pairs(body) {
 				switch f.key {
 				case "href":

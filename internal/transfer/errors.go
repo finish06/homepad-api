@@ -18,6 +18,10 @@ type Error struct {
 	Count   int    `json:"count,omitempty"`
 	Limit   int    `json:"limit,omitempty"`
 	Things  string `json:"things,omitempty"`
+	// Detail is the YAML parser's own words for a yaml_syntax error ("did
+	// not find expected key"), for the UI's "There's a problem on line {n}:
+	// {detail}." It never quotes the file.
+	Detail string `json:"detail,omitempty"`
 }
 
 func (e *Error) Error() string { return e.Code + ": " + e.Message }

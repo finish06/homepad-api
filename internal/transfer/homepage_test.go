@@ -166,6 +166,9 @@ func TestHomepage_SyntaxErrorIs400WithLine(t *testing.T) {
 	assert.Equal(t, transfer.CodeYAMLSyntax, err.Code)
 	assert.Equal(t, "settings", err.File)
 	assert.Equal(t, 2, err.Line)
+	// The UI builds "There's a problem on line {n}: {detail}." from Detail.
+	assert.Equal(t, "mapping values are not allowed in this context", err.Detail)
+	assert.Equal(t, "There's a problem on line 2: mapping values are not allowed in this context.", err.Message)
 }
 
 // §4.5 — custom tags are refused.

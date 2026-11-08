@@ -501,10 +501,8 @@ func PlanRestore(st *storage.TransferState, d *Decoded, mode string) *Plan {
 
 	// Apps and their uploaded icons.
 	curBySlug := map[string]storage.TransferApp{}
-	slugByID := map[string]string{}
 	for _, a := range curApps {
 		curBySlug[a.Slug] = a
-		slugByID[a.ID] = a.Slug
 		o.appIDs[a.Slug] = a.ID
 	}
 	validSlugs := map[string]bool{}
@@ -679,14 +677,14 @@ func PlanRestore(st *storage.TransferState, d *Decoded, mode string) *Plan {
 		}
 		pend = append(pend, po)
 	}
-	om := make([]bool, len(pend))
-	os := make([]int, len(pend))
+	offerMatched := make([]bool, len(pend))
+	offerSort := make([]int, len(pend))
 	for i, po := range pend {
 		if po.cur != nil {
-			om[i], os[i] = true, po.cur.SortIndex
+			offerMatched[i], offerSort[i] = true, po.cur.SortIndex
 		}
 	}
-	otargets := slots(os, om, maxOffer)
+	otargets := slots(offerSort, offerMatched, maxOffer)
 	for i, po := range pend {
 		po.row.SortIndex = otargets[i]
 		if po.cur == nil {

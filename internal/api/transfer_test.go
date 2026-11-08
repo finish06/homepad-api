@@ -60,6 +60,7 @@ type tError struct {
 	Count   int    `json:"count"`
 	Limit   int    `json:"limit"`
 	Things  string `json:"things"`
+	Detail  string `json:"detail"`
 	Plan    *tPlan `json:"plan"`
 }
 
@@ -669,6 +670,8 @@ func TestTransfer_Refusals(t *testing.T) {
 	e = decodeAs[tError](t, b)
 	assert.Equal(t, "yaml_syntax", e.Code)
 	assert.Greater(t, e.Line, 0)
+	assert.NotEmpty(t, e.Detail)
+	assert.NotContains(t, e.Detail, "line", "the line is its own field")
 
 	code, _ = postRaw(t, env.URL+"/api/admin/import/homepage/preview", "admin-session", []byte(`{"services": 3}`))
 	assert.Equal(t, http.StatusBadRequest, code)
