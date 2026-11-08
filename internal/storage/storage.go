@@ -80,6 +80,9 @@ type User struct {
 	// AvatarColor is the account's avatar color, one of the frontend accent ids
 	// (SPEC-kid-accounts §2.3); "" when unset, as it is for every adult today.
 	AvatarColor string
+	// ShowWidgets is the per-user "Show widgets" switch (SPEC-status-widgets
+	// AC-031): tile widget lines and the glance strip. NOT NULL DEFAULT TRUE.
+	ShowWidgets bool
 }
 
 // userColumns is the one SELECT list every User read uses. email and
@@ -87,14 +90,14 @@ type User struct {
 // "": a kid reads back with no email and an empty hash, which bcrypt can never
 // match.
 const userColumns = `id, COALESCE(email, ''), COALESCE(password_hash, ''), role, theme_pref, density_pref,
-	show_health_bar, show_uptime_display, COALESCE(display_name, ''), COALESCE(avatar_color, '')`
+	show_health_bar, show_uptime_display, COALESCE(display_name, ''), COALESCE(avatar_color, ''), show_widgets`
 
 // scanUser scans a row selected with userColumns first; extra receives any
 // columns selected after them.
 func scanUser(row pgx.Row, extra ...any) (User, error) {
 	var u User
 	dest := append([]any{&u.ID, &u.Email, &u.PasswordHash, &u.Role, &u.ThemePref, &u.DensityPref,
-		&u.ShowHealthBar, &u.ShowUptimeDisplay, &u.DisplayName, &u.AvatarColor}, extra...)
+		&u.ShowHealthBar, &u.ShowUptimeDisplay, &u.DisplayName, &u.AvatarColor, &u.ShowWidgets}, extra...)
 	err := row.Scan(dest...)
 	return u, err
 }

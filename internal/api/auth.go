@@ -49,12 +49,15 @@ type userView struct {
 	DisplayName string `json:"displayName"`
 	// AvatarColor is the account's avatar color (an accent id), "" when unset.
 	AvatarColor string `json:"avatarColor"`
+	// ShowWidgets is the per-user "Show widgets" switch (SPEC-status-widgets
+	// AC-031). Not a pointer — the column is NOT NULL DEFAULT TRUE.
+	ShowWidgets bool `json:"showWidgets"`
 }
 
 func newUserView(u storage.User) userView {
 	return userView{ID: u.ID, Email: u.Email, Role: u.Role, ThemePref: u.ThemePref, DensityPref: u.DensityPref,
 		ShowHealthBar: u.ShowHealthBar, ShowUptimeDisplay: u.ShowUptimeDisplay, Name: u.DisplayName,
-		DisplayName: u.DisplayName, AvatarColor: u.AvatarColor}
+		DisplayName: u.DisplayName, AvatarColor: u.AvatarColor, ShowWidgets: u.ShowWidgets}
 }
 
 func (s *server) handleRegister(w http.ResponseWriter, r *http.Request) {
@@ -189,6 +192,7 @@ func (s *server) handlePatchMe(w http.ResponseWriter, r *http.Request) {
 		DensityPref       *string `json:"densityPref"`
 		ShowHealthBar     *bool   `json:"showHealthBar"`
 		ShowUptimeDisplay *bool   `json:"showUptimeDisplay"`
+		ShowWidgets       *bool   `json:"showWidgets"`
 	}
 	if err := json.Unmarshal(raw, &body); err != nil {
 		http.Error(w, "invalid JSON body", http.StatusBadRequest)
@@ -211,8 +215,8 @@ func (s *server) handlePatchMe(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if body.ThemePref == nil && body.DensityPref == nil && body.ShowHealthBar == nil &&
-		body.ShowUptimeDisplay == nil {
-		http.Error(w, "body must include themePref, densityPref, showHealthBar or showUptimeDisplay", http.StatusBadRequest)
+		body.ShowUptimeDisplay == nil && body.ShowWidgets == nil {
+		http.Error(w, "body must include themePref, densityPref, showHealthBar, showUptimeDisplay or showWidgets", http.StatusBadRequest)
 		return
 	}
 	// Validate everything before writing anything, so a bad field cannot
@@ -257,6 +261,15 @@ func (s *server) handlePatchMe(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		u.ShowUptimeDisplay = *body.ShowUptimeDisplay
+	}
+	// SPEC-status-widgets AC-031 — the per-user "Show widgets" switch. A kid
+	// never reaches here with it (the themePref-only rule above).
+	if body.ShowWidgets != nil {
+		if err := s.store.SetShowWidgets(r.Context(), u.ID, *body.ShowWidgets); err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		u.ShowWidgets = *body.ShowWidgets
 	}
 	writeJSON(w, http.StatusOK, newUserView(u))
 }

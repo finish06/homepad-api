@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"time"
 
@@ -50,16 +51,35 @@ func (s *server) handlePatchSystemSettings(w http.ResponseWriter, r *http.Reques
 	if _, ok := s.requireAdmin(w, r); !ok {
 		return
 	}
+	raw, err := io.ReadAll(io.LimitReader(r.Body, 64<<10))
+	if err != nil {
+		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		return
+	}
 	var in struct {
 		ShowUptimeDisplay *bool `json:"showUptimeDisplay"`
 		StatusDegradedMs  *int  `json:"statusDegradedMs"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+	if err := json.Unmarshal(raw, &in); err != nil {
 		http.Error(w, "invalid JSON body", http.StatusBadRequest)
 		return
 	}
 	if in.StatusDegradedMs != nil && (*in.StatusDegradedMs < 0 || *in.StatusDegradedMs > maxStatusDegradedMs) {
 		http.Error(w, "statusDegradedMs must be between 0 and 600000", http.StatusBadRequest)
+		return
+	}
+	// SPEC-status-widgets §7.3 — the clock, weather and web search settings
+	// ride on the same PATCH. They are validated (422) before anything is
+	// written, and echoed in a separate `widgets` block: this route is
+	// admin-only, while systemConfigView is also the PUBLIC GET's shape and
+	// must not grow the household's place.
+	widgetsView, fe, err := s.patchWidgetSettings(r.Context(), raw)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if fe != nil {
+		writeFieldError(w, fe)
 		return
 	}
 	cur, err := s.store.SystemSettings(r.Context())
@@ -84,5 +104,8 @@ func (s *server) handlePatchSystemSettings(w http.ResponseWriter, r *http.Reques
 	if saved.StatusDegradedMs != nil {
 		s.poller.SetDegradedAfter(time.Duration(*saved.StatusDegradedMs) * time.Millisecond)
 	}
-	writeJSON(w, http.StatusOK, s.toSystemConfigView(saved))
+	writeJSON(w, http.StatusOK, struct {
+		systemConfigView
+		Widgets widgetSettingsView `json:"widgets"`
+	}{s.toSystemConfigView(saved), widgetsView})
 }

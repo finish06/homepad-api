@@ -3,6 +3,7 @@ package testsupport
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -17,6 +18,8 @@ import (
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/oidc"
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/session"
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/storage"
+	"gitea.kube.calebdunn.tech/code/homepad-api/internal/widgets"
+	"gitea.kube.calebdunn.tech/code/homepad-api/internal/widgets/providers"
 )
 
 // NewOIDCServer returns a homepad-api server wired with the given OIDC config,
@@ -93,6 +96,101 @@ type Env struct {
 	// plain user behind "non-admin-session".
 	AdminID string
 	UserID  string
+	// Widgets and Weather are the server's widget manager and weather
+	// fetcher (SPEC-status-widgets). Their background loops are NOT running:
+	// a test drives them with RefreshNow / RefreshDue, so results are
+	// deterministic.
+	Widgets *widgets.Manager
+	Weather *widgets.Weather
+	deps    api.Deps // as built, for Restart
+}
+
+// TestSecretKey is the HOMEPAD_SECRET_KEY every test server gets unless a
+// test asks for another (or none).
+const TestSecretKey = "5e1f0a4c2b7d9e8f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7"
+
+// WidgetOptions configures a test server's widget wiring.
+type WidgetOptions struct {
+	// SecretKey is the server key (64 hex chars); "" = TestSecretKey.
+	SecretKey string
+	// NoSecretKey runs the server with HOMEPAD_SECRET_KEY unset.
+	NoSecretKey bool
+	// ForecastURL / GeocodeURL point the weather at a fake Open-Meteo. Unset
+	// = a black hole, so nothing can reach the real service from a test.
+	ForecastURL string
+	GeocodeURL  string
+	// Outbound replaces the guarded client (e.g. one with a recording dialer).
+	Outbound *widgets.Client
+}
+
+// NewEnvWidgets is NewEnvWithGatus (no Gatus stub when endpoints is nil)
+// with explicit widget options.
+func NewEnvWidgets(t *testing.T, endpoints map[string][]GatusResult, o WidgetOptions) *Env {
+	t.Helper()
+	url := "http://127.0.0.1:1"
+	if endpoints != nil {
+		url = gatusStub(t, endpoints)
+	}
+	return newServerWith(t, url, Options{Widgets: o})
+}
+
+// Restart builds a new API server over the same database, sessions and
+// fixtures, as a restarted process would — e.g. with a different
+// HOMEPAD_SECRET_KEY (AC-005). Nothing is truncated or re-seeded.
+func (e *Env) Restart(t *testing.T, o WidgetOptions) *Env {
+	t.Helper()
+	n := *e
+	n.deps = withWidgets(t, e.deps, e.Store, o)
+	n.Widgets, n.Weather = n.deps.Widgets, n.deps.Weather
+	srv := httptest.NewServer(api.New(n.deps))
+	t.Cleanup(srv.Close)
+	n.Server = srv
+	return &n
+}
+
+// withWidgets returns deps with a fresh widget manager, weather fetcher,
+// sealer and guarded client, per o.
+func withWidgets(t *testing.T, deps api.Deps, store *storage.Store, o WidgetOptions) api.Deps {
+	t.Helper()
+	key := o.SecretKey
+	if key == "" {
+		key = TestSecretKey
+	}
+	var sealer *widgets.Sealer
+	if !o.NoSecretKey {
+		var err error
+		sealer, err = widgets.ParseSecretKey(key)
+		if err != nil || sealer == nil {
+			t.Fatalf("test secret key: %v", err)
+		}
+	}
+	outbound := o.Outbound
+	if outbound == nil {
+		outbound = widgets.NewClient()
+	}
+	blackHole := "http://127.0.0.1:1"
+	forecast, geocode := o.ForecastURL, o.GeocodeURL
+	if forecast == "" {
+		forecast = blackHole + "/v1/forecast"
+	}
+	if geocode == "" {
+		geocode = blackHole + "/v1/search"
+	}
+	kinds := providers.Default()
+	mgr := widgets.NewManager(widgets.ManagerOptions{
+		Source: api.NewWidgetSource(store), Registry: kinds, Client: outbound, Sealer: sealer, Logf: log.Printf,
+	})
+	if err := mgr.LoadAll(context.Background()); err != nil {
+		t.Fatalf("widgets load: %v", err)
+	}
+	weather := widgets.NewWeather(widgets.WeatherOptions{
+		Client: outbound, ForecastURL: forecast, GeocodeURL: geocode, Logf: log.Printf,
+	})
+	if ws, err := api.LoadWeatherSettings(context.Background(), store); err == nil {
+		weather.Configure(ws)
+	}
+	deps.Widgets, deps.Weather, deps.Sealer, deps.WidgetKinds, deps.Outbound = mgr, weather, sealer, kinds, outbound
+	return deps
 }
 
 // NewEnv is NewServer, returning the whole fixture.
@@ -190,6 +288,8 @@ type Options struct {
 	InviteLimit api.RateLimit
 	// Empty skips every seed: a fresh install with no accounts at all.
 	Empty bool
+	// Widgets configures the status-widget wiring (SPEC-status-widgets).
+	Widgets WidgetOptions
 }
 
 // NewEnvWith is NewEnv with the given options.
@@ -235,9 +335,11 @@ func newServerWith(t *testing.T, gatusURL string, opts Options) *Env {
 		InviteLimit:  opts.InviteLimit,
 	}
 	if opts.Empty {
+		deps = withWidgets(t, deps, store, opts.Widgets)
 		srv := httptest.NewServer(api.New(deps))
 		t.Cleanup(srv.Close)
-		return &Env{Server: srv, Store: store, Sessions: sessions, DSN: dsn}
+		return &Env{Server: srv, Store: store, Sessions: sessions, DSN: dsn,
+			Widgets: deps.Widgets, Weather: deps.Weather, deps: deps}
 	}
 
 	admin := seedUser(t, ctx, store, "admin@homepad.test", "stitch-admin-pw", "admin")
@@ -271,9 +373,11 @@ func newServerWith(t *testing.T, gatusURL string, opts Options) *Env {
 		_ = seedService(t, ctx, store, owner, "grafana", "Grafana", "core_grafana")
 	}
 
+	deps = withWidgets(t, deps, store, opts.Widgets)
 	srv := httptest.NewServer(api.New(deps))
 	t.Cleanup(srv.Close)
-	return &Env{Server: srv, Store: store, Sessions: sessions, DSN: dsn, AdminID: admin, UserID: user}
+	return &Env{Server: srv, Store: store, Sessions: sessions, DSN: dsn, AdminID: admin, UserID: user,
+		Widgets: deps.Widgets, Weather: deps.Weather, deps: deps}
 }
 
 // guardDestructive fails the test immediately unless dsn points at a throwaway

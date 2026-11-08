@@ -13,9 +13,9 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
-	"time"
 
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/storage"
+	"gitea.kube.calebdunn.tech/code/homepad-api/internal/widgets"
 )
 
 // Icon validation caps (spec v2-app-icons). Kept in one place so they're
@@ -180,9 +180,9 @@ func (s *server) handleDeleteIcon(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// faviconTimeout bounds every fetch-icon HTTP hop (§7.4 step 2). A dedicated
-// client (not http.DefaultClient) keeps the timeout scoped to this feature.
-const faviconTimeout = 5 * time.Second
+// faviconPageMax caps how much of the page HTML is scanned for a <link>.
+// The rest of a larger page is ignored, not an error.
+const faviconPageMax = 512 * 1024
 
 // linkTagRe / relRe / hrefRe sniff a favicon <link> out of HTML. This is a
 // deliberate pragmatic match, NOT a full HTML parse — it avoids pulling in
@@ -215,7 +215,7 @@ func (s *server) handleFetchIcon(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	body, ferr := fetchFavicon(r.Context(), rawURL)
+	body, ferr := fetchFavicon(r.Context(), s.outbound, rawURL)
 	if ferr != nil {
 		http.Error(w, "Could not fetch favicon: "+ferr.Error(), http.StatusUnprocessableEntity)
 		return
@@ -256,22 +256,27 @@ func (s *server) handleFetchIcon(w http.ResponseWriter, r *http.Request) {
 // page HTML for a <link rel="icon"> (resolved against the page URL); failing
 // that, it falls back to {origin}/favicon.ico (§7.4 steps 3–4). Returns the raw
 // image bytes, or an error if nothing usable could be fetched.
-func fetchFavicon(ctx context.Context, rawURL string) ([]byte, error) {
+//
+// #90 — every request goes through the guarded client, like widget fetches:
+// no redirect is followed (a 3xx just means "nothing here"), link-local and
+// metadata addresses are never dialled, bodies are capped and each request
+// has 5s. The error never carries the address.
+func fetchFavicon(ctx context.Context, client *widgets.Client, rawURL string) ([]byte, error) {
 	base, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil || !base.IsAbs() || base.Host == "" {
 		return nil, fmt.Errorf("invalid service url")
 	}
 
-	if href := discoverIconHref(ctx, base); href != "" {
+	if href := discoverIconHref(ctx, client, base); href != "" {
 		if ref, perr := base.Parse(href); perr == nil {
-			if b, derr := downloadImage(ctx, ref.String()); derr == nil {
+			if b, derr := downloadImage(ctx, client, ref); derr == nil {
 				return b, nil
 			}
 		}
 	}
 
-	fallback := url.URL{Scheme: base.Scheme, Host: base.Host, Path: "/favicon.ico"}
-	if b, derr := downloadImage(ctx, fallback.String()); derr == nil {
+	fallback := &url.URL{Scheme: base.Scheme, Host: base.Host, Path: "/favicon.ico"}
+	if b, derr := downloadImage(ctx, client, fallback); derr == nil {
 		return b, nil
 	}
 	return nil, fmt.Errorf("no favicon found")
@@ -279,26 +284,14 @@ func fetchFavicon(ctx context.Context, rawURL string) ([]byte, error) {
 
 // discoverIconHref GETs the page and returns the href of the first <link> whose
 // rel names an icon, or "" if the page can't be read or has no such link.
-func discoverIconHref(ctx context.Context, page *url.URL) string {
-	client := &http.Client{Timeout: faviconTimeout}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, page.String(), nil)
-	if err != nil {
+func discoverIconHref(ctx context.Context, client *widgets.Client, page *url.URL) string {
+	// Scan at most faviconPageMax bytes so a giant/streaming body can't
+	// exhaust memory; a longer page is scanned from its start.
+	resp, err := client.Do(ctx, widgets.Request{URL: page, MaxBody: faviconPageMax, AllowTruncate: true})
+	if err != nil || resp.Status != http.StatusOK {
 		return ""
 	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return ""
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return ""
-	}
-	// Cap the HTML we scan so a giant/streaming body can't exhaust memory.
-	html, err := io.ReadAll(io.LimitReader(resp.Body, 512*1024))
-	if err != nil {
-		return ""
-	}
-	for _, tag := range linkTagRe.FindAllString(string(html), -1) {
+	for _, tag := range linkTagRe.FindAllString(string(resp.Body), -1) {
 		rel := relRe.FindStringSubmatch(tag)
 		if rel == nil || !strings.Contains(strings.ToLower(rel[1]), "icon") {
 			continue
@@ -313,22 +306,16 @@ func discoverIconHref(ctx context.Context, page *url.URL) string {
 // downloadImage GETs an icon URL and returns its bytes. It rejects a non-200, a
 // declared non-image content type (§7.4), and reads at most one byte past the
 // icon cap so the handler's size check can fire.
-func downloadImage(ctx context.Context, iconURL string) ([]byte, error) {
-	client := &http.Client{Timeout: faviconTimeout}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, iconURL, nil)
+func downloadImage(ctx context.Context, client *widgets.Client, iconURL *url.URL) ([]byte, error) {
+	resp, err := client.Do(ctx, widgets.Request{URL: iconURL, MaxBody: iconMaxBytes + 1, AllowTruncate: true})
 	if err != nil {
 		return nil, err
 	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("icon fetch returned %d", resp.StatusCode)
+	if resp.Status != http.StatusOK {
+		return nil, fmt.Errorf("icon fetch returned %d", resp.Status)
 	}
 	if ct := resp.Header.Get("Content-Type"); ct != "" && !strings.Contains(strings.ToLower(ct), "image") {
-		return nil, fmt.Errorf("icon content-type %q is not an image", ct)
+		return nil, fmt.Errorf("icon content-type is not an image")
 	}
-	return io.ReadAll(io.LimitReader(resp.Body, iconMaxBytes+1))
+	return resp.Body, nil
 }

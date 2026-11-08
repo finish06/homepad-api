@@ -1,6 +1,7 @@
 package api
 
 import (
+	"log"
 	"net/http"
 	"os"
 	"time"
@@ -10,6 +11,8 @@ import (
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/session"
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/storage"
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/transfer"
+	"gitea.kube.calebdunn.tech/code/homepad-api/internal/widgets"
+	"gitea.kube.calebdunn.tech/code/homepad-api/internal/widgets/providers"
 )
 
 const sessionCookie = "homepad_session"
@@ -28,6 +31,16 @@ type Deps struct {
 	MaxAccounts int
 	// InviteLimit is the public invite routes' rate limit; zero is the default.
 	InviteLimit RateLimit
+
+	// Status widgets (SPEC-status-widgets). All optional: New builds a
+	// default for any left nil, so a server always has a working set.
+	Widgets     *widgets.Manager
+	Weather     *widgets.Weather
+	Sealer      *widgets.Sealer // nil = HOMEPAD_SECRET_KEY unset: keys can't be saved
+	WidgetKinds *widgets.Registry
+	// Outbound is the guarded client for every server-side fetch of an
+	// admin-supplied address: widgets and favicons (#90).
+	Outbound *widgets.Client
 }
 
 type server struct {
@@ -47,6 +60,14 @@ type server struct {
 	// transferWrap, when set (tests only), wraps the Writer every restore and
 	// import apply writes through.
 	transferWrap func(transfer.Writer) transfer.Writer
+
+	// Status widgets (SPEC-status-widgets).
+	widgets     *widgets.Manager
+	weather     *widgets.Weather
+	sealer      *widgets.Sealer
+	widgetKinds *widgets.Registry
+	outbound    *widgets.Client
+	tests       testLimiter
 }
 
 func New(d Deps) http.Handler {
@@ -55,7 +76,7 @@ func New(d Deps) http.Handler {
 }
 
 func newServer(d Deps) *server {
-	return &server{
+	s := &server{
 		store:        d.Store,
 		poller:       d.Poller,
 		sessions:     d.Sessions,
@@ -64,7 +85,29 @@ func newServer(d Deps) *server {
 		oidc:         d.OIDC,
 		maxAccounts:  d.MaxAccounts,
 		inviteBucket: newTokenBucket(d.InviteLimit, time.Now),
+		widgets:      d.Widgets,
+		weather:      d.Weather,
+		sealer:       d.Sealer,
+		widgetKinds:  d.WidgetKinds,
+		outbound:     d.Outbound,
 	}
+	// Defaults for anything left unwired, so every server has a working
+	// widget set (the manager's loop only runs where main starts it).
+	if s.outbound == nil {
+		s.outbound = widgets.NewClient()
+	}
+	if s.widgetKinds == nil {
+		s.widgetKinds = providers.Default()
+	}
+	if s.weather == nil {
+		s.weather = widgets.NewWeather(widgets.WeatherOptions{Client: s.outbound, Logf: log.Printf})
+	}
+	if s.widgets == nil {
+		s.widgets = widgets.NewManager(widgets.ManagerOptions{
+			Source: NewWidgetSource(d.Store), Registry: s.widgetKinds, Client: s.outbound, Sealer: s.sealer, Logf: log.Printf,
+		})
+	}
+	return s
 }
 
 // routeClass is what a route means for a kid session (SPEC-kid-accounts §7).
@@ -204,6 +247,16 @@ func (s *server) routes(d Deps) (http.Handler, []registeredRoute) {
 	rt.handle("POST /api/admin/restore", classAdminOnly, s.handleRestore)
 	rt.handle("POST /api/admin/import/homepage/preview", classAdminOnly, s.handleImportPreview)
 	rt.handle("POST /api/admin/import/homepage", classAdminOnly, s.handleImport)
+
+	// SPEC-status-widgets §7.1. The info strip holds no catalog data, so
+	// kids read it (catalog-free); every widget config route is admin-only.
+	rt.handle("GET /api/widgets/info", classCatalogFree, s.handleWidgetsInfo)
+	rt.handle("GET /api/admin/widgets/kinds", classAdminOnly, s.handleWidgetKinds)
+	rt.handle("GET /api/services/{id}/widget", classAdminOnly, s.handleGetWidget)
+	rt.handle("PUT /api/services/{id}/widget", classAdminOnly, s.handlePutWidget)
+	rt.handle("DELETE /api/services/{id}/widget", classAdminOnly, s.handleDeleteWidget)
+	rt.handle("POST /api/services/{id}/widget/test", classAdminOnly, s.handleTestWidget)
+	rt.handle("GET /api/admin/geocode", classAdminOnly, s.handleGeocode)
 
 	// OIDC config is always advertised so the web client can gate its
 	// "Log in with PocketID" button. The login/callback endpoints exist
