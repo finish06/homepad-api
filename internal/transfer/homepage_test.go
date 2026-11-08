@@ -171,6 +171,29 @@ func TestHomepage_SyntaxErrorIs400WithLine(t *testing.T) {
 	assert.Equal(t, "There's a problem on line 2: mapping values are not allowed in this context.", err.Message)
 }
 
+// AC-028 — the line is the line the problem is on. yaml.v3 reports parser
+// errors one line early, and none at all on line 1; the UI selects this line
+// in the textarea, so it has to be right.
+func TestHomepage_SyntaxErrorLineIsExact(t *testing.T) {
+	cases := []struct {
+		in   string
+		line int
+	}{
+		{"- Media:\n    - A:\n        href: [oops\n", 3},
+		{"- Media:\n    - A:\n        href: [oops\n    - B:\n        href: https://b.example.com\n", 3},
+		{"- Media:\n  - A: x\n - B: y\n", 3},
+		{"- Media:\n    - A:\n\t    href: https://a.example.com\n", 3},
+		{"- Media: []\ntitle: a\n  bad: indent\n", 2},
+		{"- a: b: c\n", 1},
+		{"- Media:\n    - A:\n        widget: { type: x,\n          key: y }\n        href: : bad\n", 5},
+	}
+	for _, c := range cases {
+		err := parseErr(t, transfer.HomepageInput{Services: c.in})
+		assert.Equal(t, transfer.CodeYAMLSyntax, err.Code, "%q", c.in)
+		assert.Equal(t, c.line, err.Line, "%q: %s", c.in, err.Message)
+	}
+}
+
 // §4.5 — custom tags are refused.
 func TestHomepage_RefusesCustomTags(t *testing.T) {
 	for _, tag := range []string{"!env", "!!python/object", "!secret"} {
