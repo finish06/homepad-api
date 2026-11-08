@@ -236,7 +236,12 @@ func (m *Manager) LoadAll(ctx context.Context) error {
 	for _, r := range rows {
 		e := &entry{cfg: r, st: &State{}, due: now}
 		if old, ok := m.entries[r.ServiceID]; ok {
+			// A fetch still in flight keeps the widget marked, so the
+			// scheduler skips it instead of queueing a second fetch behind
+			// the per-widget lock (one in flight per widget). Its result is
+			// for the old generation and is discarded by finish.
 			e.gen = old.gen + 1
+			e.inflight = old.inflight
 		}
 		next[r.ServiceID] = e
 	}

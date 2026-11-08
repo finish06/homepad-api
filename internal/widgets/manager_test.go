@@ -44,6 +44,7 @@ type fakeProvider struct {
 
 	inflight, maxInflight atomic.Int32
 	block                 chan struct{}
+	blockHost             string // when set, only fetches to this host block
 	started               chan struct{}
 }
 
@@ -76,7 +77,7 @@ func (p *fakeProvider) Fetch(ctx context.Context, c *Client, cfg Config, st *Sta
 	if p.started != nil {
 		p.started <- struct{}{}
 	}
-	if p.block != nil {
+	if p.block != nil && (p.blockHost == "" || (cfg.BaseURL != nil && cfg.BaseURL.Host == p.blockHost)) {
 		<-p.block
 	}
 	p.mu.Lock()
@@ -596,9 +597,12 @@ func TestCleanVersion(t *testing.T) {
 // loop) and LoadAll. Only the per-widget fetch lock is held across the
 // upstream call, and none of these take it.
 func TestManager_HungFetchBlocksNoReader(t *testing.T) {
-	r := newRig(t, nil, row("s1"), row("s2"))
+	other := row("s2")
+	other.ServiceURL = "http://other.home.arpa:8989"
+	r := newRig(t, nil, row("s1"), other)
 	r.prov.block = make(chan struct{})
-	r.prov.started = make(chan struct{}, 4)
+	r.prov.blockHost = "app.home.arpa:8096" // only s1's upstream hangs
+	r.prov.started = make(chan struct{}, 8)
 	ctx := context.Background()
 
 	fetched := make(chan struct{})
@@ -628,21 +632,20 @@ func TestManager_HungFetchBlocksNoReader(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, StateLoading, v.State, "an in-flight first fetch reads as loading")
 
-	// RefreshDue skips the in-flight widget instead of waiting for it, and
-	// still fetches the others (s2, due again after LoadAll).
+	// RefreshDue skips the in-flight widget instead of waiting for it (or
+	// queueing a second fetch of it), and still fetches the others: s2 is
+	// due again after LoadAll.
+	before := r.prov.callCount()
 	dueDone := make(chan struct{})
 	go func() { r.m.RefreshDue(ctx); close(dueDone) }()
-	select {
-	case <-r.prov.started:
-		r.prov.block <- struct{}{} // let s2's fetch finish
-	case <-time.After(2 * time.Second):
-		t.Fatal("RefreshDue didn't fetch the widget that wasn't stuck")
-	}
 	select {
 	case <-dueDone:
 	case <-time.After(time.Second):
 		t.Fatal("RefreshDue waited on the stuck fetch")
 	}
+	assert.Equal(t, before+1, r.prov.callCount(), "s2 was fetched; s1 was skipped, not queued")
+	v, _ = r.m.View("s2")
+	assert.Equal(t, StateOK, v.State)
 
 	r.prov.block <- struct{}{}
 	<-fetched
