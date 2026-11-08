@@ -590,3 +590,60 @@ func TestCleanVersion(t *testing.T) {
 	assert.Len(t, cleanVersion(strings.Repeat("1", 500)), 0)
 	assert.Equal(t, "1.2.3+build", cleanVersion("1.2.3+build"))
 }
+
+// AC-016 — a fetch stuck in its upstream never blocks what a handler calls:
+// View (GET /api/services), Reload (PUT), Remove (DELETE), RefreshDue (the
+// loop) and LoadAll. Only the per-widget fetch lock is held across the
+// upstream call, and none of these take it.
+func TestManager_HungFetchBlocksNoReader(t *testing.T) {
+	r := newRig(t, nil, row("s1"), row("s2"))
+	r.prov.block = make(chan struct{})
+	r.prov.started = make(chan struct{}, 4)
+	ctx := context.Background()
+
+	fetched := make(chan struct{})
+	go func() { r.m.RefreshNow(ctx, "s1"); close(fetched) }()
+	select {
+	case <-r.prov.started: // the fetch is inside the provider, holding the upstream
+	case <-time.After(2 * time.Second):
+		t.Fatal("the fetch never reached the provider")
+	}
+
+	calls := map[string]func(){
+		"View":    func() { r.m.View("s1") },
+		"Reload":  func() { _ = r.m.Reload(ctx, "s2") },
+		"Remove":  func() { r.m.Remove("nope") },
+		"LoadAll": func() { _ = r.m.LoadAll(ctx) },
+	}
+	for name, call := range calls {
+		returned := make(chan struct{})
+		go func() { call(); close(returned) }()
+		select {
+		case <-returned:
+		case <-time.After(time.Second):
+			t.Fatalf("%s waited on a fetch that is stuck in its upstream", name)
+		}
+	}
+	v, ok := r.m.View("s1")
+	require.True(t, ok)
+	assert.Equal(t, StateLoading, v.State, "an in-flight first fetch reads as loading")
+
+	// RefreshDue skips the in-flight widget instead of waiting for it, and
+	// still fetches the others (s2, due again after LoadAll).
+	dueDone := make(chan struct{})
+	go func() { r.m.RefreshDue(ctx); close(dueDone) }()
+	select {
+	case <-r.prov.started:
+		r.prov.block <- struct{}{} // let s2's fetch finish
+	case <-time.After(2 * time.Second):
+		t.Fatal("RefreshDue didn't fetch the widget that wasn't stuck")
+	}
+	select {
+	case <-dueDone:
+	case <-time.After(time.Second):
+		t.Fatal("RefreshDue waited on the stuck fetch")
+	}
+
+	r.prov.block <- struct{}{}
+	<-fetched
+}
