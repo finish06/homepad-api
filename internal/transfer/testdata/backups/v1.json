@@ -1,0 +1,171 @@
+{
+  "format": "homepad-backup",
+  "schemaVersion": 1,
+  "exportedAt": "2026-11-07T18:04:11Z",
+  "homepadVersion": "17.1.0",
+  "includesPeople": true,
+  "settings": {
+    "showUptimeDisplay": true,
+    "statusDegradedMs": 1500
+  },
+  "sections": [
+    {
+      "name": "Media",
+      "gridWidth": 6
+    },
+    {
+      "name": "Network",
+      "gridWidth": 3
+    },
+    {
+      "name": "Tools",
+      "gridWidth": 12
+    }
+  ],
+  "apps": [
+    {
+      "slug": "grafana",
+      "name": "Grafana",
+      "description": "Dashboards",
+      "url": "https://grafana.home.arpa",
+      "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/grafana.png",
+      "section": "Tools",
+      "clickAction": "new_tab",
+      "gatusKey": "tools_grafana",
+      "uploadedIcons": {}
+    },
+    {
+      "slug": "jellyfin",
+      "name": "Jellyfin",
+      "description": "Movies and TV",
+      "url": "https://jellyfin.example.com",
+      "icon": "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/jellyfin.png",
+      "section": "Media",
+      "clickAction": "new_tab",
+      "gatusKey": "media_jellyfin",
+      "uploadedIcons": {
+        "light": {
+          "png": "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAMUlEQVR4nOzNMQ0AMAwDQQ8pfwqFWpVDvJ1l/XqT3JP0Pj/NAQAAAAAAAAAAgC3gDQCj6gJXFtFYdAAAAABJRU5ErkJggg==",
+          "sha256": "55a202d33848083e4cfafa505607b003fd5a8df6055e0288a055dc639bd423f1"
+        },
+        "dark": {
+          "png": "iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAIAAADYYG7QAAAAQUlEQVR4nOzOQQkAMBADwTyu/i1UaqmLcEwI+55J7kl6Pj9NAwICAgICAgICAgICAgICAgICAgICAgICAtoMegMAri8DN3QmNe8AAAAASUVORK5CYII=",
+          "sha256": "47d3a3d15c471922e8750466e348ac80845e111fa5e284be553d46d33d083842"
+        }
+      }
+    },
+    {
+      "slug": "router",
+      "name": "Router",
+      "description": "",
+      "url": "http://192.0.2.1",
+      "icon": "",
+      "section": null,
+      "clickAction": "same_tab",
+      "gatusKey": null,
+      "uploadedIcons": {}
+    },
+    {
+      "slug": "sonarr",
+      "name": "Sonarr",
+      "description": "Series",
+      "url": "https://sonarr.home.arpa",
+      "icon": "",
+      "section": "Media",
+      "clickAction": "iframe",
+      "gatusKey": null,
+      "uploadedIcons": {
+        "dark": {
+          "png": "iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAIAAADYYG7QAAAAQUlEQVR4nOzOQQkAMBADwTyu/i1UaqmLcEwI+55J7kl6Pj9NAwICAgICAgICAgICAgICAgICAgICAgICAtoMegMAri8DN3QmNe8AAAAASUVORK5CYII=",
+          "sha256": "47d3a3d15c471922e8750466e348ac80845e111fa5e284be553d46d33d083842"
+        }
+      }
+    },
+    {
+      "slug": "unifi",
+      "name": "UniFi",
+      "description": "Network controller",
+      "url": "https://unifi.home.arpa:8443",
+      "icon": "",
+      "section": "Network",
+      "clickAction": "new_tab",
+      "gatusKey": "network_unifi",
+      "uploadedIcons": {}
+    }
+  ],
+  "library": [
+    {
+      "name": "Immich",
+      "url": "https://immich.app",
+      "icon": "",
+      "description": "Photos",
+      "suggestedCategory": "Media"
+    },
+    {
+      "name": "Grafana",
+      "url": "https://grafana.home.arpa",
+      "icon": "",
+      "description": "Dashboards",
+      "suggestedCategory": "Tools"
+    }
+  ],
+  "people": {
+    "adults": [
+      {
+        "email": "alex@example.com",
+        "displayName": "Alex",
+        "avatarColor": null,
+        "prefs": {
+          "theme": "dark",
+          "density": "compact",
+          "showHealthBar": true,
+          "showUptimeDisplay": true
+        },
+        "favorites": [
+          "jellyfin"
+        ],
+        "order": [
+          "jellyfin",
+          "sonarr",
+          "router"
+        ],
+        "collapsedSections": [
+          "Network"
+        ]
+      },
+      {
+        "email": "sam@example.com",
+        "displayName": null,
+        "avatarColor": null,
+        "prefs": {
+          "theme": "system",
+          "density": "large",
+          "showHealthBar": false,
+          "showUptimeDisplay": false
+        },
+        "favorites": [],
+        "order": [],
+        "collapsedSections": []
+      }
+    ],
+    "kids": [
+      {
+        "name": "Maya",
+        "avatarColor": "teal",
+        "prefs": {
+          "theme": "light",
+          "density": "large",
+          "showHealthBar": false,
+          "showUptimeDisplay": true
+        },
+        "allowedApps": [
+          "jellyfin",
+          "sonarr"
+        ],
+        "favorites": [
+          "jellyfin"
+        ]
+      }
+    ]
+  }
+}

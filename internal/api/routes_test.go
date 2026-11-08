@@ -122,6 +122,13 @@ var expectedRouteClasses = map[string]string{
 	"POST /api/admin/invites":        "admin-only",
 	"GET /api/admin/invites":         "admin-only",
 	"DELETE /api/admin/invites/{id}": "admin-only",
+
+	// Backup, restore and Homepage import (SPEC-backup-import §8).
+	"GET /api/admin/export":                   "admin-only",
+	"POST /api/admin/restore/preview":         "admin-only",
+	"POST /api/admin/restore":                 "admin-only",
+	"POST /api/admin/import/homepage/preview": "admin-only",
+	"POST /api/admin/import/homepage":         "admin-only",
 }
 
 // allRoutes is the full registration: OIDC on (so its two routes register)

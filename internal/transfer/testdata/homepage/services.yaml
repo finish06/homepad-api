@@ -1,0 +1,58 @@
+---
+# For configuration options and examples, please see:
+# https://gethomepage.dev/configs/services/
+
+- Media:
+    - Jellyfin:
+        icon: jellyfin.png
+        href: https://jellyfin.home.arpa
+        description: Movies and TV
+        siteMonitor: https://jellyfin.home.arpa
+        widget:
+          type: jellyfin
+          url: https://jellyfin.home.arpa
+          key: fixture-widget-key-7c1d
+          enableBlocks: true
+    - Sonarr:
+        icon: sh-sonarr
+        href: https://sonarr.home.arpa/
+        description: Series
+        weight: 50
+        server: my-docker
+        container: sonarr
+        showStats: true
+        widget:
+          type: sonarr
+          url: http://sonarr.home.arpa
+          key: fixture-widget-key-7c1d
+    - Plex:
+        icon: mdi-plex-#E5A00D
+        href: http://plex.home.arpa:32400/web
+        target: _self
+
+- Network:
+    - Router:
+        icon: https://cdn.example.com/icons/router.svg
+        href: http://192.0.2.1
+        ping: 192.0.2.1
+        statusStyle: dot
+    - Pi-hole:
+        icon: pi-hole.svg
+        href: http://pihole.home.arpa/admin
+        description: DNS for {{HOMEPAGE_VAR_LAN_NAME}}
+        siteMonitor: http://pihole.home.arpa/admin
+    - DNS:
+        - AdGuard:
+            icon: /icons/adguard.png
+            href: https://adguard.home.arpa
+            app: adguard
+            namespace: dns
+            podSelector: app=adguard
+
+- Monitoring:
+    - Grafana:
+        icon: grafana.png
+        href: "{{HOMEPAGE_VAR_GRAFANA_URL}}"
+    - Uptime Kuma:
+        href: ssh://uptime.home.arpa
+    - Broken:

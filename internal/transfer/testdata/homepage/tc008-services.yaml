@@ -1,0 +1,19 @@
+- Media:
+    - Sonarr:
+        icon: sonarr.png
+        href: http://sonarr.home.arpa/
+        description: Series
+        siteMonitor: http://sonarr.home.arpa/
+        widget: { type: sonarr, url: http://sonarr.home.arpa, key: abc123 }
+    - Plex:
+        icon: mdi-plex
+        href: http://plex.home.arpa/
+- Infra:
+    - Router:
+        href: http://192.0.2.1
+        ping: 192.0.2.1
+        target: _self
+    - Core:
+        - Proxmox:
+            icon: https://example.com/proxmox.png
+            href: https://pve.home.arpa:8006

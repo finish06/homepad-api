@@ -9,6 +9,7 @@ import (
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/oidc"
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/session"
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/storage"
+	"gitea.kube.calebdunn.tech/code/homepad-api/internal/transfer"
 )
 
 const sessionCookie = "homepad_session"
@@ -43,6 +44,9 @@ type server struct {
 	// inviteBucket is the one rate limit the public invite routes share
 	// (SPEC-household-basics §3.4). Per server, so per process.
 	inviteBucket *tokenBucket
+	// transferWrap, when set (tests only), wraps the Writer every restore and
+	// import apply writes through.
+	transferWrap func(transfer.Writer) transfer.Writer
 }
 
 func New(d Deps) http.Handler {
@@ -193,6 +197,13 @@ func (s *server) routes(d Deps) (http.Handler, []registeredRoute) {
 	rt.handle("DELETE /api/admin/invites/{id}", classAdminOnly, s.handleRevokeInvite)
 	rt.handle("POST /api/invites/lookup", classPublic, rateLimited(s.inviteBucket, s.handleLookupInvite))
 	rt.handle("POST /api/invites/accept", classPublic, rateLimited(s.inviteBucket, s.handleAcceptInvite))
+
+	// SPEC-backup-import §8 — backup, restore and Homepage import.
+	rt.handle("GET /api/admin/export", classAdminOnly, s.handleExport)
+	rt.handle("POST /api/admin/restore/preview", classAdminOnly, s.handleRestorePreview)
+	rt.handle("POST /api/admin/restore", classAdminOnly, s.handleRestore)
+	rt.handle("POST /api/admin/import/homepage/preview", classAdminOnly, s.handleImportPreview)
+	rt.handle("POST /api/admin/import/homepage", classAdminOnly, s.handleImport)
 
 	// OIDC config is always advertised so the web client can gate its
 	// "Log in with PocketID" button. The login/callback endpoints exist

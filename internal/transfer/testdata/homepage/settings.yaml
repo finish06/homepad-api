@@ -1,0 +1,22 @@
+---
+# For configuration options and examples, please see:
+# https://gethomepage.dev/configs/settings
+
+title: Home lab
+theme: dark
+color: slate
+background: https://images.example.com/bg.jpg
+target: _blank
+providers:
+  openweathermap: fixture-provider-key-55ab
+layout:
+  Network:
+    style: row
+    columns: 4
+  Media:
+    style: row
+    columns: 3
+  Developer:
+    tab: Links
+quicklaunch:
+  searchDescriptions: true
