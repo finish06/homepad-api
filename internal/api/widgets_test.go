@@ -773,9 +773,24 @@ func TestWidgets_SecretKeyNotInEnvConfig(t *testing.T) {
 
 // AC-016 — GET /api/services reads the manager's snapshot: an upstream that
 // hangs can't slow it down or fail it.
+//
+// The GET is only timed once the fetch is provably stuck inside the upstream
+// request: by then the fetch has finished its own database read, so the two
+// can't race for a pool connection (main run 6417 timed exactly that race),
+// and the test can't pass by running the GET before the fetch starts. The
+// upstream is still being held when the list comes back, which shows the list
+// didn't wait for the fetch.
 func TestWidgets_ServicesNeverWaitOnAnUpstream(t *testing.T) {
 	release := make(chan struct{})
+	entered := make(chan struct{}, 1)
+	var held atomic.Bool
 	hung := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		held.Store(true)
+		defer held.Store(false)
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
 		select {
 		case <-release:
 		case <-r.Context().Done():
@@ -790,11 +805,19 @@ func TestWidgets_ServicesNeverWaitOnAnUpstream(t *testing.T) {
 	require.Equal(t, http.StatusOK, code)
 	done := make(chan struct{})
 	go func() { env.Widgets.RefreshNow(context.Background(), id); close(done) }()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the fetch never reached the upstream")
+	}
 
 	start := time.Now()
 	code, b := c.do(http.MethodGet, "/api/services", "admin-session", nil)
+	elapsed := time.Since(start)
+	stillHeld := held.Load()
 	require.Equal(t, http.StatusOK, code)
-	assert.Less(t, time.Since(start), time.Second, "the list doesn't wait for the fetch")
+	assert.True(t, stillHeld, "the list came back while the fetch was still stuck upstream")
+	assert.Less(t, elapsed, time.Second, "the list doesn't wait for the fetch")
 	w, ok := serviceWidget(t, b, id)
 	require.True(t, ok)
 	assert.Equal(t, "loading", w["state"])

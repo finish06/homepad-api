@@ -44,6 +44,7 @@ type fakeProvider struct {
 
 	inflight, maxInflight atomic.Int32
 	block                 chan struct{}
+	blockHost             string // when set, only fetches to this host block
 	started               chan struct{}
 }
 
@@ -76,7 +77,7 @@ func (p *fakeProvider) Fetch(ctx context.Context, c *Client, cfg Config, st *Sta
 	if p.started != nil {
 		p.started <- struct{}{}
 	}
-	if p.block != nil {
+	if p.block != nil && (p.blockHost == "" || (cfg.BaseURL != nil && cfg.BaseURL.Host == p.blockHost)) {
 		<-p.block
 	}
 	p.mu.Lock()
@@ -589,4 +590,63 @@ func TestCleanVersion(t *testing.T) {
 	assert.Equal(t, "", cleanVersion("v1 with spaces"))
 	assert.Len(t, cleanVersion(strings.Repeat("1", 500)), 0)
 	assert.Equal(t, "1.2.3+build", cleanVersion("1.2.3+build"))
+}
+
+// AC-016 — a fetch stuck in its upstream never blocks what a handler calls:
+// View (GET /api/services), Reload (PUT), Remove (DELETE), RefreshDue (the
+// loop) and LoadAll. Only the per-widget fetch lock is held across the
+// upstream call, and none of these take it.
+func TestManager_HungFetchBlocksNoReader(t *testing.T) {
+	other := row("s2")
+	other.ServiceURL = "http://other.home.arpa:8989"
+	r := newRig(t, nil, row("s1"), other)
+	r.prov.block = make(chan struct{})
+	r.prov.blockHost = "app.home.arpa:8096" // only s1's upstream hangs
+	r.prov.started = make(chan struct{}, 8)
+	ctx := context.Background()
+
+	fetched := make(chan struct{})
+	go func() { r.m.RefreshNow(ctx, "s1"); close(fetched) }()
+	select {
+	case <-r.prov.started: // the fetch is inside the provider, holding the upstream
+	case <-time.After(2 * time.Second):
+		t.Fatal("the fetch never reached the provider")
+	}
+
+	calls := map[string]func(){
+		"View":    func() { r.m.View("s1") },
+		"Reload":  func() { _ = r.m.Reload(ctx, "s2") },
+		"Remove":  func() { r.m.Remove("nope") },
+		"LoadAll": func() { _ = r.m.LoadAll(ctx) },
+	}
+	for name, call := range calls {
+		returned := make(chan struct{})
+		go func() { call(); close(returned) }()
+		select {
+		case <-returned:
+		case <-time.After(time.Second):
+			t.Fatalf("%s waited on a fetch that is stuck in its upstream", name)
+		}
+	}
+	v, ok := r.m.View("s1")
+	require.True(t, ok)
+	assert.Equal(t, StateLoading, v.State, "an in-flight first fetch reads as loading")
+
+	// RefreshDue skips the in-flight widget instead of waiting for it (or
+	// queueing a second fetch of it), and still fetches the others: s2 is
+	// due again after LoadAll.
+	before := r.prov.callCount()
+	dueDone := make(chan struct{})
+	go func() { r.m.RefreshDue(ctx); close(dueDone) }()
+	select {
+	case <-dueDone:
+	case <-time.After(time.Second):
+		t.Fatal("RefreshDue waited on the stuck fetch")
+	}
+	assert.Equal(t, before+1, r.prov.callCount(), "s2 was fetched; s1 was skipped, not queued")
+	v, _ = r.m.View("s2")
+	assert.Equal(t, StateOK, v.State)
+
+	r.prov.block <- struct{}{}
+	<-fetched
 }
