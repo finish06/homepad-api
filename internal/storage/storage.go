@@ -80,6 +80,9 @@ type User struct {
 	// AvatarColor is the account's avatar color, one of the frontend accent ids
 	// (SPEC-kid-accounts §2.3); "" when unset, as it is for every adult today.
 	AvatarColor string
+	// ShowWidgets is the per-user "Show widgets" switch (SPEC-status-widgets
+	// AC-031): tile widget lines and the glance strip. NOT NULL DEFAULT TRUE.
+	ShowWidgets bool
 }
 
 // userColumns is the one SELECT list every User read uses. email and

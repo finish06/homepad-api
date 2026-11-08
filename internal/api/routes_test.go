@@ -129,6 +129,18 @@ var expectedRouteClasses = map[string]string{
 	"POST /api/admin/restore":                 "admin-only",
 	"POST /api/admin/import/homepage/preview": "admin-only",
 	"POST /api/admin/import/homepage":         "admin-only",
+
+	// Status widgets (SPEC-status-widgets §7.1, AC-015, AC-029). The info
+	// strip carries no catalog data (clock settings, the household's weather,
+	// a search URL), so kids may read it; it is never public. Every widget
+	// config route is admin-only.
+	"GET /api/widgets/info":               "catalog-free",
+	"GET /api/admin/widgets/kinds":        "admin-only",
+	"GET /api/services/{id}/widget":       "admin-only",
+	"PUT /api/services/{id}/widget":       "admin-only",
+	"DELETE /api/services/{id}/widget":    "admin-only",
+	"POST /api/services/{id}/widget/test": "admin-only",
+	"GET /api/admin/geocode":              "admin-only",
 }
 
 // allRoutes is the full registration: OIDC on (so its two routes register)
@@ -261,12 +273,24 @@ const muxNotFound = "404 page not found\n"
 
 func TestRoutes_KidProbeOfEveryRoute(t *testing.T) {
 	w := newKidWorld(t)
+	ctx0 := context.Background()
 	offer := createOffer(t, w.env.URL, "admin-session", "Plex", "https://plex.example.com")
 	// The hidden service has an uploaded icon, so an unfiltered icon read would
 	// actually serve bytes.
 	r := putIcon(t, w.env.URL, "admin-session", w.hiddenID, "light", pngBytes(t, 32, 32))
 	r.Body.Close()
 	require.Equal(t, http.StatusNoContent, r.StatusCode)
+	// SPEC-status-widgets §8.3 — the allowed AND the hidden app carry a
+	// working widget, so a route that forgot to drop widget data for kids
+	// would have some to leak.
+	app := newFakeArrApp(t)
+	for _, id := range []string{w.allowedID, w.hiddenID} {
+		wr := doJSON(t, http.MethodPut, w.env.URL+"/api/services/"+id+"/widget", "admin-session",
+			widgetBody(app.URL, map[string]any{"secret": arrKey}))
+		wr.Body.Close()
+		require.Equal(t, http.StatusOK, wr.StatusCode)
+		w.env.Widgets.RefreshNow(ctx0, id)
+	}
 
 	live := map[string]bool{}
 	for _, rt := range api.RegisteredRoutes(api.Deps{Store: w.env.Store, Sessions: w.env.Sessions}) {
@@ -296,6 +320,9 @@ func TestRoutes_KidProbeOfEveryRoute(t *testing.T) {
 			assert.NotEqual(t, http.StatusMethodNotAllowed, resp.StatusCode, "the probe must reach the route")
 			assert.NotEqual(t, muxNotFound, string(body), "the probe must reach the handler, not the mux 404")
 			assertNoHiddenMarkers(t, w, rt.Pattern, body)
+			// AC-014 — kids receive no widget data from any route.
+			assert.NotContains(t, string(body), `"widget"`, "%s: a kid response carries widget data", rt.Pattern)
+			assert.NotContains(t, string(body), arrKey, "%s: a kid response carries a widget key", rt.Pattern)
 
 			switch rt.Class {
 			case "kid-forbidden", "admin-only", "catalog-write":

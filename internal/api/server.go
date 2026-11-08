@@ -10,6 +10,7 @@ import (
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/session"
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/storage"
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/transfer"
+	"gitea.kube.calebdunn.tech/code/homepad-api/internal/widgets"
 )
 
 const sessionCookie = "homepad_session"
@@ -28,6 +29,16 @@ type Deps struct {
 	MaxAccounts int
 	// InviteLimit is the public invite routes' rate limit; zero is the default.
 	InviteLimit RateLimit
+
+	// Status widgets (SPEC-status-widgets). All optional: New builds a
+	// default for any left nil, so a server always has a working set.
+	Widgets     *widgets.Manager
+	Weather     *widgets.Weather
+	Sealer      *widgets.Sealer // nil = HOMEPAD_SECRET_KEY unset: keys can't be saved
+	WidgetKinds *widgets.Registry
+	// Outbound is the guarded client for every server-side fetch of an
+	// admin-supplied address: widgets and favicons (#90).
+	Outbound *widgets.Client
 }
 
 type server struct {
