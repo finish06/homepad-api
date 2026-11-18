@@ -10,6 +10,7 @@ jobs:
         with:
           image-name: homepad-api
           staging-url: ""
+          qa-backend: ${{ vars.QA_BACKEND || 'nats' }}
           # Unit-only gate: a bare `go test ./...` trips the intentional
           # DATABASE_URL guard (issue #13). This is exactly what `make test-unit`
           # runs (inlined so the gate doesn't depend on make being on the runner):
@@ -30,3 +31,4 @@ jobs:
           REGISTRY_PASSWORD:  ${{ secrets.REGISTRY_PASSWORD }}
           NATS_PUBLISH_URL:   ${{ secrets.NATS_PUBLISH_URL }}
           NATS_PUBLISH_TOKEN: ${{ secrets.NATS_PUBLISH_TOKEN }}
+          QA_TRIGGER_TOKEN:   ${{ secrets.QA_TRIGGER_TOKEN }}
