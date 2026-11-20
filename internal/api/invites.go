@@ -244,6 +244,10 @@ func (s *server) handleAcceptInvite(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "password must be at least 8 characters", http.StatusBadRequest)
 		return
 	}
+	if passwordTooLong(in.Password) {
+		http.Error(w, passwordTooLongMsg, http.StatusBadRequest)
+		return
+	}
 	name := ""
 	if in.Name != nil {
 		n, ok := cleanDisplayName(*in.Name)
@@ -278,7 +282,7 @@ func (s *server) handleAcceptInvite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	log.Printf("invite: invite %s accepted, created user %s role=%s", inv.ID, u.ID, u.Role)
-	if !s.startSession(w, r, u, s.cookieSecure) {
+	if !s.startSession(w, r, u) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, newUserView(u))

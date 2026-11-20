@@ -416,12 +416,11 @@ func (s *server) handleSignInHere(w http.ResponseWriter, r *http.Request) {
 		// The admin is already signed out here; clear the cookie so the
 		// device shows the login screen rather than a dead session.
 		log.Printf("sign-in-here: create kid session: %v", err)
-		http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: "", Path: "/", HttpOnly: true,
-			Secure: s.cookieSecure, SameSite: http.SameSiteLaxMode, MaxAge: -1})
+		http.SetCookie(w, s.clearedSessionCookie())
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 	log.Printf("sign-in-here: admin %s signed a device in as kid %s", admin.ID, kid.ID)
-	http.SetCookie(w, newSessionCookie(token, lifetime, s.cookieSecure))
+	http.SetCookie(w, s.sessionCookie(token, lifetime))
 	w.WriteHeader(http.StatusNoContent)
 }

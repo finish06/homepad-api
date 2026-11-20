@@ -68,6 +68,10 @@ type server struct {
 	widgetKinds *widgets.Registry
 	outbound    *widgets.Client
 	tests       testLimiter
+
+	// comparePassword is the bcrypt compare login uses; nil means
+	// bcrypt.CompareHashAndPassword. Tests inject a counting one.
+	comparePassword func(hash, password []byte) error
 }
 
 func New(d Deps) http.Handler {
