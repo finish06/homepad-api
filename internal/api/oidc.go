@@ -135,10 +135,8 @@ func (s *server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Secure stays off here, exactly as before persistent sessions: this
-	// callback has never honoured COOKIE_SECURE. Aligning it with local login
-	// is a separate, deliberate change.
-	if !s.startSession(w, r, u, false) {
+	// The cookie follows COOKIE_SECURE, like every other sign-in path.
+	if !s.startSession(w, r, u) {
 		return
 	}
 	http.Redirect(w, r, "/", http.StatusFound)

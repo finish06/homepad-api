@@ -22,6 +22,27 @@ const maxPatchMeBody = 64 * 1024
 // modest so it gates obviously-weak inputs without dictating a full policy.
 const minPasswordLen = 8
 
+// maxPasswordBytes is bcrypt's input limit. It is bytes, not characters: a
+// password of accented letters or emoji reaches it in fewer characters.
+// bcrypt.GenerateFromPassword refuses anything longer, and
+// bcrypt.CompareHashAndPassword silently ignores the bytes past it.
+const maxPasswordBytes = 72
+
+// passwordTooLongMsg is the 400 for a new password over maxPasswordBytes.
+const passwordTooLongMsg = "password must be at most 72 bytes (accented letters and emoji count as more than one)"
+
+// passwordTooLong reports whether pw is over bcrypt's 72-byte limit. A
+// handler that sets a password checks it with its other input checks and
+// answers 400 with passwordTooLongMsg; one that forgets gets
+// bcrypt.ErrPasswordTooLong from GenerateFromPassword, a 500.
+func passwordTooLong(pw string) bool { return len(pw) > maxPasswordBytes }
+
+// dummyPasswordHash is a bcrypt hash, at bcrypt.DefaultCost, of a random value
+// nobody kept. Login compares against it when there is no real hash to check,
+// so an unknown email costs the same bcrypt work as a known one and response
+// time does not reveal which emails have accounts.
+const dummyPasswordHash = "$2a$10$O.YsuStnwFgRlkSdkYcep.klXevT2FfHRe3fGvqNg7audcPxN2jZK"
+
 type credentials struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
@@ -63,6 +84,10 @@ func newUserView(u storage.User) userView {
 func (s *server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	c, ok := decodeCredentials(w, r)
 	if !ok {
+		return
+	}
+	if passwordTooLong(c.Password) {
+		http.Error(w, passwordTooLongMsg, http.StatusBadRequest)
 		return
 	}
 
@@ -121,19 +146,47 @@ func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	u, err := s.store.UserByEmail(r.Context(), c.Email)
-	// Only adults sign in here. UserByEmail cannot return a kid (kids have no
-	// email or password), and the role check keeps it that way even if that
-	// ever changed: a kid is signed in only by an admin, on the device.
-	if err != nil || !storage.IsAdultRole(u.Role) || u.PasswordHash == "" ||
-		bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(c.Password)) != nil {
+	if !s.loginPasswordOK(u, err, c.Password) {
 		http.Error(w, "invalid email or password", http.StatusUnauthorized)
 		return
 	}
 
-	if !s.startSession(w, r, u, s.cookieSecure) {
+	if !s.startSession(w, r, u) {
 		return
 	}
 	writeJSON(w, http.StatusOK, newUserView(u))
+}
+
+// loginPasswordOK reports whether password signs u in, given the error from
+// looking u up by email. It runs exactly one bcrypt compare on every path.
+// When there is no real hash to check (no such email, a failed lookup, a kid,
+// an OIDC-only account, a password over 72 bytes) it compares against
+// dummyPasswordHash and returns false, so the answer takes the same time
+// whether or not the email has an account.
+//
+// Only adults sign in here. UserByEmail cannot return a kid (kids have no
+// email or password), and the role check keeps it that way even if that ever
+// changed: a kid is signed in only by an admin, on the device. A password
+// over 72 bytes always fails: no such password can have been set, and bcrypt
+// would otherwise ignore the extra bytes and match on the first 72.
+func (s *server) loginPasswordOK(u storage.User, lookupErr error, password string) bool {
+	compare := s.comparePassword
+	if compare == nil {
+		compare = bcrypt.CompareHashAndPassword
+	}
+	hash := []byte(u.PasswordHash)
+	usable := lookupErr == nil && storage.IsAdultRole(u.Role) && !passwordTooLong(password) && isBcryptHash(hash)
+	if !usable {
+		hash = []byte(dummyPasswordHash)
+	}
+	return compare(hash, []byte(password)) == nil && usable
+}
+
+// isBcryptHash reports whether h parses as a bcrypt hash. An empty hash or
+// the OIDC placeholder does not, and comparing against one returns at once.
+func isBcryptHash(h []byte) bool {
+	_, err := bcrypt.Cost(h)
+	return err == nil
 }
 
 // handleLogout deletes the session row and clears the cookie. The cookie is
@@ -147,15 +200,7 @@ func (s *server) handleLogout(w http.ResponseWriter, r *http.Request) {
 			status = http.StatusInternalServerError
 		}
 	}
-	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookie,
-		Value:    "",
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   s.cookieSecure,
-		SameSite: http.SameSiteLaxMode,
-		MaxAge:   -1,
-	})
+	http.SetCookie(w, s.clearedSessionCookie())
 	w.WriteHeader(status)
 }
 
@@ -310,7 +355,7 @@ func (s *server) currentUser(w http.ResponseWriter, r *http.Request) (storage.Us
 		if err != nil {
 			log.Printf("session: slide: %v", err)
 		} else if slid {
-			http.SetCookie(w, newSessionCookie(ck.Value, lifetime, s.cookieSecure))
+			http.SetCookie(w, s.sessionCookie(ck.Value, lifetime))
 		}
 	}
 	return u, true
