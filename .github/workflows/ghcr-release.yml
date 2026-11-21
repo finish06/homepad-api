@@ -79,8 +79,10 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          # The semver version without the leading v (e.g. 18.0.0). The Dockerfile
-          # writes it into backups as homepadVersion; without it the images say "dev".
-          build-args: VERSION=${{ steps.meta.outputs.version }}
+          # The Dockerfile writes VERSION into backups as homepadVersion. A tag
+          # build gets the semver version without the leading v (e.g. 18.0.0).
+          # A main build gets dev-<commit sha>; metadata-action's version output
+          # would be "latest" there, which names no build.
+          build-args: VERSION=${{ startsWith(github.ref, 'refs/tags/v') && steps.meta.outputs.version || format('dev-{0}', github.sha) }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
