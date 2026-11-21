@@ -86,8 +86,11 @@ database may not have started.
 **What it does** (most steps come from ci-shared's `mr-staging`):
 
 - If the PR only changes docs (Markdown, text, `docs/`, `specs/`, README,
-  CHANGELOG, LICENSE), it skips everything below and tries to auto-approve the PR
-  as the `ci-docs-approver` bot. No build, no QA.
+  CHANGELOG, LICENSE), it skips everything below. No build, no QA. It then
+  tries to auto-approve the PR as the `ci-docs-approver` bot, but today that
+  **doesn't work**: this workflow doesn't pass the approver's token, so the run
+  only logs a warning (and stays green). A docs-only PR still needs someone to
+  approve it.
 - Runs the quick unit tests only (`go test ./... -count=1 -run ^Test -short`).
   Tests that need a database skip themselves here; `ci.yml` runs those.
 - Builds the PR's image and pushes it with two tags: `<short-sha>-test` and
