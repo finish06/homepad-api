@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -22,6 +24,12 @@ import (
 
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
+
+	// SPEC-password-reset-link Q5 — the lone admin's way back in. It runs
+	// against the same database and exits; the server doesn't start.
+	if len(os.Args) > 1 && os.Args[1] == "reset-link" {
+		os.Exit(runResetLink(context.Background(), os.Getenv("DATABASE_URL"), os.Args[2:], os.Stdout, os.Stderr))
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -178,8 +186,8 @@ func main() {
 	log.Println("homepad-api stopped")
 }
 
-// sweepInvites deletes stale invites now and then every interval, until ctx
-// ends.
+// sweepInvites deletes stale invites and reset links now and then every
+// interval, until ctx ends.
 func sweepInvites(ctx context.Context, store *storage.Store, every time.Duration) {
 	sweep := func() {
 		n, err := store.DeleteStaleInvites(ctx, api.InviteRetention)
@@ -191,6 +199,17 @@ func sweepInvites(ctx context.Context, store *storage.Store, every time.Duration
 		}
 		if n > 0 {
 			log.Printf("invite sweep: deleted %d old invites", n)
+		}
+		// Reset links follow the same 30-day rule (SPEC-password-reset-link §6).
+		n, err = store.DeleteStalePasswordResets(ctx, api.ResetRetention)
+		if err != nil {
+			if ctx.Err() == nil {
+				log.Printf("reset link sweep: %v", err)
+			}
+			return
+		}
+		if n > 0 {
+			log.Printf("reset link sweep: deleted %d old reset links", n)
 		}
 	}
 	sweep()
@@ -211,4 +230,24 @@ func envOr(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// runResetLink is `homepad-api reset-link <email>`: it opens the database at
+// dsn and prints a one-time /#reset= path for that adult (AC-016). The token
+// goes to stdout only; the audit line goes to the log, with cli as the actor.
+func runResetLink(ctx context.Context, dsn string, args []string, stdout, stderr io.Writer) int {
+	if dsn == "" {
+		fmt.Fprintln(stderr, "DATABASE_URL is unset. Run this where the API runs: docker compose exec api /homepad-api reset-link <email>")
+		return 1
+	}
+	if len(args) != 1 {
+		return api.ResetLinkCommand(ctx, nil, args, stdout, stderr)
+	}
+	store, err := storage.Open(ctx, dsn)
+	if err != nil {
+		fmt.Fprintf(stderr, "Couldn't open the database: %v\n", err)
+		return 1
+	}
+	defer store.Close()
+	return api.ResetLinkCommand(ctx, store, args, stdout, stderr)
 }

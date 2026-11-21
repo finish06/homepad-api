@@ -73,12 +73,18 @@ type userView struct {
 	// ShowWidgets is the per-user "Show widgets" switch (SPEC-status-widgets
 	// AC-031). Not a pointer — the column is NOT NULL DEFAULT TRUE.
 	ShowWidgets bool `json:"showWidgets"`
+	// HasPassword is true for an adult who signs in with a password: false
+	// for kids and for accounts that only use single sign-on
+	// (SPEC-password-reset-link AC-020). My settings shows Change password
+	// only when it's true.
+	HasPassword bool `json:"hasPassword"`
 }
 
 func newUserView(u storage.User) userView {
 	return userView{ID: u.ID, Email: u.Email, Role: u.Role, ThemePref: u.ThemePref, DensityPref: u.DensityPref,
 		ShowHealthBar: u.ShowHealthBar, ShowUptimeDisplay: u.ShowUptimeDisplay, Name: u.DisplayName,
-		DisplayName: u.DisplayName, AvatarColor: u.AvatarColor, ShowWidgets: u.ShowWidgets}
+		DisplayName: u.DisplayName, AvatarColor: u.AvatarColor, ShowWidgets: u.ShowWidgets,
+		HasPassword: u.HasLocalPassword()}
 }
 
 func (s *server) handleRegister(w http.ResponseWriter, r *http.Request) {

@@ -47,6 +47,10 @@ type accountView struct {
 	AvatarColor string     `json:"avatarColor"`
 	AppCount    *int       `json:"appCount,omitempty"`    // kids only
 	DeviceCount *int       `json:"deviceCount,omitempty"` // kids only
+	// HasPassword is computed as for GET /api/me: false for kids and for
+	// SSO-only accounts, which get no reset link (SPEC-password-reset-link
+	// AC-021).
+	HasPassword bool `json:"hasPassword"`
 }
 
 // deviceView is one signed-in device of a kid (§7). ID is the session's
@@ -59,7 +63,7 @@ type deviceView struct {
 }
 
 func (s *server) newAccountView(r *http.Request, u storage.User, appCount int) (accountView, error) {
-	v := accountView{ID: u.ID, Name: u.DisplayName, Role: u.Role, AvatarColor: u.AvatarColor}
+	v := accountView{ID: u.ID, Name: u.DisplayName, Role: u.Role, AvatarColor: u.AvatarColor, HasPassword: u.HasLocalPassword()}
 	if storage.IsAdultRole(u.Role) {
 		v.Email = u.Email
 		if v.Name == "" {

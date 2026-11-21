@@ -115,6 +115,14 @@ func seedSSOUser(t *testing.T, env *testsupport.Env, email string) (id, token st
 	return u.ID, token
 }
 
+// seedOtherAdmin adds a second admin with a password and returns its id.
+func seedOtherAdmin(t *testing.T, env *testsupport.Env) string {
+	t.Helper()
+	u, err := env.Store.CreateUser(context.Background(), "other-admin@homepad.test", "$2a$04$not-a-real-hash-but-looks-like-one", "admin")
+	require.NoError(t, err)
+	return u.ID
+}
+
 func errorCode(t *testing.T, body []byte) string {
 	t.Helper()
 	var v struct {
@@ -211,7 +219,7 @@ func TestResetLink_CreateTargets(t *testing.T) {
 	require.Equal(t, http.StatusConflict, code, string(b))
 	assert.Equal(t, "self", errorCode(t, b))
 
-	second := seedSecondAdmin(t, env)
+	second := seedOtherAdmin(t, env)
 	mustResetLink(t, env, second)
 }
 
@@ -232,7 +240,7 @@ func TestResetLink_ExpiresIn24Hours(t *testing.T) {
 func TestResetLink_NewLinkRevokesTheOldOne(t *testing.T) {
 	env := resetEnv(t)
 	first := mustResetLink(t, env, env.UserID)
-	other := mustResetLink(t, env, seedSecondAdmin(t, env))
+	other := mustResetLink(t, env, seedOtherAdmin(t, env))
 	second := mustResetLink(t, env, env.UserID)
 
 	code, _ := lookupReset(t, env, first.Token)
@@ -285,7 +293,7 @@ func TestResetLink_EveryDeadLinkLooksTheSame(t *testing.T) {
 	revoked := mustResetLink(t, env, env.UserID)
 	mustResetLink(t, env, env.UserID) // revokes it
 
-	second := seedSecondAdmin(t, env)
+	second := seedOtherAdmin(t, env)
 	expired := mustResetLink(t, env, second)
 	_, err := env.Store.Pool().Exec(ctx,
 		`UPDATE password_resets SET created_at = now() - interval '25 hours', expires_at = now() - interval '1 hour' WHERE id = $1`, expired.ID)
