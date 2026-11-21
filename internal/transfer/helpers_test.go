@@ -25,6 +25,8 @@ type memWriter struct {
 	// calls records every write, in order, for tests that check what an
 	// apply did and didn't touch.
 	calls []string
+	// created is every app row CreateApp got, in order.
+	created []storage.TransferAppRow
 }
 
 func newMem(st *storage.TransferState) *memWriter { return &memWriter{st: st} }
@@ -117,8 +119,10 @@ func (m *memWriter) CreateApp(_ context.Context, a storage.TransferAppRow) (stri
 	}
 	id := m.id("app")
 	m.log("CreateApp %s", a.Slug)
+	m.created = append(m.created, a)
 	m.st.Apps = append(m.st.Apps, storage.TransferApp{ID: id, Slug: a.Slug, Name: a.Name, Description: a.Description,
-		URL: a.URL, Icon: a.Icon, GatusKey: a.GatusKey, ClickAction: a.ClickAction, SectionID: a.SectionID})
+		URL: a.URL, Icon: a.Icon, GatusKey: a.GatusKey, ClickAction: a.ClickAction, SectionID: a.SectionID,
+		IframeSameOrigin: a.IframeSameOrigin != nil && *a.IframeSameOrigin})
 	return id, nil
 }
 
@@ -129,6 +133,9 @@ func (m *memWriter) UpdateApp(_ context.Context, id string, a storage.TransferAp
 		if x.ID == id {
 			x.Slug, x.Name, x.Description, x.URL, x.Icon = a.Slug, a.Name, a.Description, a.URL, a.Icon
 			x.GatusKey, x.ClickAction, x.SectionID = a.GatusKey, a.ClickAction, a.SectionID
+			if a.IframeSameOrigin != nil { // nil = leave it alone, as the SQL does
+				x.IframeSameOrigin = *a.IframeSameOrigin
+			}
 			return nil
 		}
 	}
