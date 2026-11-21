@@ -205,6 +205,35 @@ POST   /api/invites/accept                      {token, email, password, name?} 
 - OIDC links or creates an account by email only when the provider's
   `email_verified` claim is true (#89).
 
+Password reset links and changing your own password (SPEC-password-reset-link):
+
+```
+POST   /api/admin/accounts/{id}/reset-link      (admin) → 201 {id, expiresAt, token}; 404 not an adult; 409 {"error":"self"|"sso_account"}
+POST   /api/password-resets/lookup              {token} → {email, name, expiresAt}   (public)
+POST   /api/password-resets/accept              {token, password} → 200 /api/me body + session   (public)
+POST   /api/me/password                         {currentPassword, newPassword} → 204; 403 {"error":"wrong_password"}; 409 {"error":"sso_account"}
+```
+
+- A reset link is for another adult with a password: not yourself (use
+  `POST /api/me/password`), not a kid, not an account that only uses single
+  sign-on. It works once, for 24 hours. A new link revokes the earlier one.
+  The token follows the invite rules: 32 random bytes, base64url, returned
+  once, only its SHA-256 stored (migration `0022`), one 404 for every dead
+  link. Making a link changes nothing until it is used.
+- Accept sets the password, ends every session of that account, and signs
+  this device in. Lookup and accept share the invite routes' rate limit.
+- Change password ends every other session of the account and keeps this
+  one. Five wrong current passwords in 15 minutes lock it for that account
+  for 15 minutes (429 with `Retry-After`).
+- `GET /api/me` and each `GET /api/admin/accounts` row carry `hasPassword`:
+  false for kids and for accounts that only use single sign-on.
+- The only admin forgot their password: run
+  `docker compose exec api /homepad-api reset-link you@example.com` on the
+  server. It prints a one-time `/#reset=…` path and its expiry; put your
+  Homepad address in front of it. It exits 1, with the reason on stderr, for
+  an email with no adult account or an account that only uses single
+  sign-on. The link goes to stdout only and is never logged.
+
 `GET /api/services` carries `responseTimeMs` per service — the latest Gatus
 check's response time — **only when there is one**; the key is omitted (never
 `0`) for unmonitored services or when Gatus reported no duration.

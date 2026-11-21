@@ -57,6 +57,9 @@ type server struct {
 	// inviteBucket is the one rate limit the public invite routes share
 	// (SPEC-household-basics §3.4). Per server, so per process.
 	inviteBucket *tokenBucket
+	// passwordFails counts wrong current passwords on POST /api/me/password,
+	// per account (SPEC-password-reset-link §3.3). Per process.
+	passwordFails *failureLimiter
 	// transferWrap, when set (tests only), wraps the Writer every restore and
 	// import apply writes through.
 	transferWrap func(transfer.Writer) transfer.Writer
@@ -95,6 +98,7 @@ func newServer(d Deps) *server {
 		widgetKinds:  d.WidgetKinds,
 		outbound:     d.Outbound,
 	}
+	s.passwordFails = newFailureLimiter(time.Now)
 	// Defaults for anything left unwired, so every server has a working
 	// widget set (the manager's loop only runs where main starts it).
 	if s.outbound == nil {
@@ -248,6 +252,15 @@ func (s *server) routes(d Deps) (http.Handler, []registeredRoute) {
 	rt.handle("DELETE /api/admin/invites/{id}", classAdminOnly, s.handleRevokeInvite)
 	rt.handle("POST /api/invites/lookup", classPublic, rateLimited(s.inviteBucket, s.handleLookupInvite))
 	rt.handle("POST /api/invites/accept", classPublic, rateLimited(s.inviteBucket, s.handleAcceptInvite))
+
+	// SPEC-password-reset-link §7 — reset links and changing your own
+	// password. Making a link is admin-only; the link's two routes are public
+	// and share the invite routes' rate limit until SPEC-signin-hardening
+	// gives them their own.
+	rt.handle("POST /api/admin/accounts/{id}/reset-link", classAdminOnly, s.handleCreateResetLink)
+	rt.handle("POST /api/password-resets/lookup", classPublic, rateLimited(s.inviteBucket, s.handleLookupReset))
+	rt.handle("POST /api/password-resets/accept", classPublic, rateLimited(s.inviteBucket, s.handleAcceptReset))
+	rt.handle("POST /api/me/password", classKidForbidden, s.handleChangePassword)
 
 	// SPEC-backup-import §8 — backup, restore and Homepage import.
 	rt.handle("GET /api/admin/export", classAdminOnly, s.handleExport)
