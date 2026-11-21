@@ -300,16 +300,17 @@ func TestAdults_PatchRole(t *testing.T) {
 	// The same shape as GET /api/admin/accounts.
 	var raw map[string]any
 	require.NoError(t, json.Unmarshal(body, &raw))
-	list, _ := listAccounts(t, env)
 	_, listBody := listAccounts(t, env)
 	var rawList []map[string]any
 	require.NoError(t, json.Unmarshal(listBody, &rawList))
+	found := false
 	for _, r := range rawList {
 		if r["id"] == env.UserID {
-			assert.Equal(t, keysOfAny(r), keysOfAny(raw), "PATCH answers with the list's row shape")
+			found = true
+			assert.ElementsMatch(t, keysOfAny(r), keysOfAny(raw), "PATCH answers with the list's row shape")
 		}
 	}
-	require.NotEmpty(t, list)
+	require.True(t, found)
 
 	code, body = patchRole(t, env, "admin-session", env.UserID, map[string]any{"role": "user"})
 	require.Equal(t, http.StatusOK, code, string(body))
@@ -496,7 +497,7 @@ func TestAdults_AuditLines(t *testing.T) {
 	assert.Contains(t, out, fmt.Sprintf("accounts: admin %s removed adult %s role=admin", env.AdminID, alexID))
 	assert.Contains(t, out, fmt.Sprintf("invite: revoked 1 pending invites made by removed adult %s", alexID))
 	assert.Equal(t, 1, strings.Count(out, "changed role of"), "one line per role change")
-	assert.Equal(t, 1, strings.Count(out, "removed adult"), "one line per removal")
+	assert.Equal(t, 1, strings.Count(out, "accounts: admin "+env.AdminID+" removed adult"), "one line per removal")
 
 	// A same-role PATCH changes nothing and logs no change.
 	code, _ = patchRole(t, env, "admin-session", env.UserID, map[string]any{"role": "admin"})

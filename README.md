@@ -106,6 +106,18 @@ DELETE /api/admin/kids/{id}/sessions/{sid}      → 204 (the device's next reque
 POST   /api/admin/kids/{id}/sign-in-here        ends the admin's session, sets the kid's → 204
 ```
 
+Managing adults (admin-only; `{id}` is always an adult, so a kid's id is 404):
+
+```
+PATCH  /api/admin/accounts/{id}                 {role: "admin"|"user"} → 200 account row
+DELETE /api/admin/accounts/{id}                 → 204 (sessions, favorites, order, settings go too)
+```
+
+A role change signs that person out everywhere. A removal also revokes the
+invites they made. Neither touches the shared app list or any kid. An admin
+can't act on their own account (409 `{"error":"self"}`), and Homepad always
+keeps one admin (409 `{"error":"last_admin"}`).
+
 Backup, restore and Homepage import (all admin-only; SPEC-backup-import):
 
 ```
