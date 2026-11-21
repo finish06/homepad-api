@@ -61,28 +61,28 @@ func TestMigration0020_UpgradesInPlaceAndIsIdempotent(t *testing.T) {
 	require.Zero(t, n, "down drops users.show_widgets")
 
 	// First run — the upgrade; existing users get show_widgets = true.
-	require.NoError(t, store.Migrate(ctx))
+	rerunMigration(t, ctx, store, "0020_widgets.up.sql")
 	u, err := store.UserByID(ctx, admin)
 	require.NoError(t, err)
 	assert.True(t, u.ShowWidgets, "on by default for existing users (AC-031)")
 
-	svc, err := store.CreateService(ctx, admin, storage.Service{Slug: "jf", Name: "Jellyfin", URL: "http://jellyfin.home.arpa:8096"})
+	svc, err := store.CreateService(ctx, storage.Service{Slug: "jf", Name: "Jellyfin", URL: "http://jellyfin.home.arpa:8096"})
 	require.NoError(t, err)
 	_, err = store.PutWidget(ctx, storage.Widget{ServiceID: svc.ID, Kind: "jellyfin", Fields: []string{"playing"}, IntervalS: 60, Enabled: true})
 	require.NoError(t, err)
 
 	// Every later boot — a no-op that keeps the widget.
-	require.NoError(t, store.Migrate(ctx))
-	require.NoError(t, store.Migrate(ctx))
+	rerunMigration(t, ctx, store, "0020_widgets.up.sql")
+	rerunMigration(t, ctx, store, "0020_widgets.up.sql")
 	w, err := store.Widget(ctx, svc.ID)
 	require.NoError(t, err)
 	assert.Equal(t, "jellyfin", w.Kind)
 }
 
 func TestMigration0020_Constraints(t *testing.T) {
-	store, conn, admin := widgetStore(t)
+	store, conn, _ := widgetStore(t)
 	ctx := context.Background()
-	svc, err := store.CreateService(ctx, admin, storage.Service{Slug: "c20", Name: "C", URL: "https://c.example.com"})
+	svc, err := store.CreateService(ctx, storage.Service{Slug: "c20", Name: "C", URL: "https://c.example.com"})
 	require.NoError(t, err)
 
 	for name, stmt := range map[string]string{
@@ -110,7 +110,7 @@ func TestMigration0020_Constraints(t *testing.T) {
 	assert.Nil(t, w.SecretCiphertext)
 
 	// AC-023 — deleting a service deletes its widget (FK cascade).
-	require.NoError(t, store.DeleteService(ctx, svc.ID, admin))
+	require.NoError(t, store.DeleteService(ctx, svc.ID))
 	_, err = store.Widget(ctx, svc.ID)
 	assert.True(t, errors.Is(err, storage.ErrNotFound))
 	var n int
@@ -119,11 +119,11 @@ func TestMigration0020_Constraints(t *testing.T) {
 }
 
 func TestWidgets_PutGetListDelete(t *testing.T) {
-	store, conn, admin := widgetStore(t)
+	store, conn, _ := widgetStore(t)
 	ctx := context.Background()
-	a, err := store.CreateService(ctx, admin, storage.Service{Slug: "son", Name: "Sonarr", URL: "http://sonarr.home.arpa:8989"})
+	a, err := store.CreateService(ctx, storage.Service{Slug: "son", Name: "Sonarr", URL: "http://sonarr.home.arpa:8989"})
 	require.NoError(t, err)
-	b, err := store.CreateService(ctx, admin, storage.Service{Slug: "rad", Name: "Radarr", URL: "http://radarr.home.arpa:7878"})
+	b, err := store.CreateService(ctx, storage.Service{Slug: "rad", Name: "Radarr", URL: "http://radarr.home.arpa:7878"})
 	require.NoError(t, err)
 
 	ct := []byte{0xde, 0xad, 0xbe, 0xef}

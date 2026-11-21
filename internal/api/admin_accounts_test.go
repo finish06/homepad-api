@@ -346,15 +346,15 @@ func TestAdminKids_Services(t *testing.T) {
 	_, ids = getKidServices(t, env, kidID)
 	assert.Equal(t, []string{b}, ids, "whole-set replace")
 
-	// The fixture plain user owns its own (non-shared) gitea row.
-	var userSvc string
-	require.NoError(t, env.Store.Pool().QueryRow(context.Background(),
-		`SELECT id FROM services WHERE user_id = $1 LIMIT 1`, env.UserID).Scan(&userSvc))
+	// SPEC-household-catalog-owner AC-015 — an app that is gone names no app,
+	// like any other unknown id.
+	gone := env.SeedService(t, "gone", "Gone", "")
+	require.NoError(t, env.Store.DeleteService(context.Background(), gone))
 
 	for _, body := range []any{
 		map[string]any{"serviceIds": []string{a, "00000000-0000-0000-0000-000000000000"}},
 		map[string]any{"serviceIds": []string{"nope"}},
-		map[string]any{"serviceIds": []string{userSvc}},
+		map[string]any{"serviceIds": []string{gone}},
 		map[string]any{"serviceIds": nil},
 		map[string]any{},
 		map[string]any{"serviceIds": "a"},

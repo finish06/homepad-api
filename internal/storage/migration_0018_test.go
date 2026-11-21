@@ -56,7 +56,7 @@ func TestMigration0018_UpgradesInPlaceAndIsIdempotent(t *testing.T) {
 	require.Error(t, err, "precondition: before 0018 a kid cannot be stored")
 
 	// First run — the upgrade.
-	require.NoError(t, store.Migrate(ctx))
+	rerunMigration(t, ctx, store, "0018_kid_accounts.up.sql")
 
 	u, err := store.UserByID(ctx, adminID)
 	require.NoError(t, err)
@@ -68,13 +68,13 @@ func TestMigration0018_UpgradesInPlaceAndIsIdempotent(t *testing.T) {
 
 	kid, err := store.CreateKid(ctx, "Sam", "green")
 	require.NoError(t, err)
-	svc, err := store.CreateService(ctx, adminID, storage.Service{Slug: "m18", Name: "M18", URL: "https://m18.example.com"})
+	svc, err := store.CreateService(ctx, storage.Service{Slug: "m18", Name: "M18", URL: "https://m18.example.com"})
 	require.NoError(t, err)
 	require.NoError(t, store.SetKidServices(ctx, kid.ID, []string{svc.ID}))
 
 	// Every later boot — a no-op that keeps kids, their allow-lists and adults.
-	require.NoError(t, store.Migrate(ctx))
-	require.NoError(t, store.Migrate(ctx))
+	rerunMigration(t, ctx, store, "0018_kid_accounts.up.sql")
+	rerunMigration(t, ctx, store, "0018_kid_accounts.up.sql")
 
 	got, err := store.UserByID(ctx, kid.ID)
 	require.NoError(t, err)

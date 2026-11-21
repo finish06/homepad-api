@@ -56,25 +56,25 @@ func (f *faultWriter) step() error {
 	return nil
 }
 
-func (f *faultWriter) DeleteCatalog(ctx context.Context, owner string) error {
+func (f *faultWriter) DeleteCatalog(ctx context.Context) error {
 	if err := f.step(); err != nil {
 		return err
 	}
-	return f.Writer.DeleteCatalog(ctx, owner)
+	return f.Writer.DeleteCatalog(ctx)
 }
 
-func (f *faultWriter) CreateSection(ctx context.Context, owner, name string, sortIndex, width int) (string, error) {
+func (f *faultWriter) CreateSection(ctx context.Context, name string, sortIndex, width int) (string, error) {
 	if err := f.step(); err != nil {
 		return "", err
 	}
-	return f.Writer.CreateSection(ctx, owner, name, sortIndex, width)
+	return f.Writer.CreateSection(ctx, name, sortIndex, width)
 }
 
-func (f *faultWriter) UpdateSection(ctx context.Context, owner, id string, sortIndex, width int) error {
+func (f *faultWriter) UpdateSection(ctx context.Context, id string, sortIndex, width int) error {
 	if err := f.step(); err != nil {
 		return err
 	}
-	return f.Writer.UpdateSection(ctx, owner, id, sortIndex, width)
+	return f.Writer.UpdateSection(ctx, id, sortIndex, width)
 }
 
 func (f *faultWriter) CreateOffer(ctx context.Context, o storage.TransferOfferRow) (string, error) {
@@ -91,18 +91,18 @@ func (f *faultWriter) UpdateOffer(ctx context.Context, id string, o storage.Tran
 	return f.Writer.UpdateOffer(ctx, id, o)
 }
 
-func (f *faultWriter) CreateApp(ctx context.Context, owner string, a storage.TransferAppRow) (string, error) {
+func (f *faultWriter) CreateApp(ctx context.Context, a storage.TransferAppRow) (string, error) {
 	if err := f.step(); err != nil {
 		return "", err
 	}
-	return f.Writer.CreateApp(ctx, owner, a)
+	return f.Writer.CreateApp(ctx, a)
 }
 
-func (f *faultWriter) UpdateApp(ctx context.Context, owner, id string, a storage.TransferAppRow) error {
+func (f *faultWriter) UpdateApp(ctx context.Context, id string, a storage.TransferAppRow) error {
 	if err := f.step(); err != nil {
 		return err
 	}
-	return f.Writer.UpdateApp(ctx, owner, id, a)
+	return f.Writer.UpdateApp(ctx, id, a)
 }
 
 func (f *faultWriter) PutIcon(ctx context.Context, appID, variant string, png []byte, w, h int, etag string) error {

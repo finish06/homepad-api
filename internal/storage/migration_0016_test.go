@@ -53,7 +53,7 @@ func TestMigration0016_SeedsFromGlobalAndSeedsOnlyOnce(t *testing.T) {
 		`INSERT INTO users (email, password_hash, role) VALUES ('flip16@example.com','x','user') RETURNING id`).Scan(&flipID))
 
 	// First run — the seed.
-	require.NoError(t, store.Migrate(ctx))
+	rerunMigration(t, ctx, store, "0016_per_user_uptime_display.up.sql")
 
 	var keep, flip bool
 	require.NoError(t, conn.QueryRow(ctx, `SELECT show_uptime_display FROM users WHERE id=$1`, keepID).Scan(&keep))
@@ -67,7 +67,7 @@ func TestMigration0016_SeedsFromGlobalAndSeedsOnlyOnce(t *testing.T) {
 
 	// Second run — this is the regression that matters. An unguarded seed would
 	// stamp the global FALSE back over that choice, on this and every restart.
-	require.NoError(t, store.Migrate(ctx))
+	rerunMigration(t, ctx, store, "0016_per_user_uptime_display.up.sql")
 
 	require.NoError(t, conn.QueryRow(ctx, `SELECT show_uptime_display FROM users WHERE id=$1`, flipID).Scan(&flip))
 	assert.True(t, flip, "AC-021: the seed must run exactly once — a user's own choice must survive a restart")
