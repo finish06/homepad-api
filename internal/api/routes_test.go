@@ -118,6 +118,10 @@ var expectedRouteClasses = map[string]string{
 	"DELETE /api/admin/kids/{id}/sessions/{sid}": "admin-only",
 	"POST /api/admin/kids/{id}/sign-in-here":     "admin-only",
 
+	// Manage adults (SPEC-household-manage-adults §7): change a role, remove.
+	"PATCH /api/admin/accounts/{id}":  "admin-only",
+	"DELETE /api/admin/accounts/{id}": "admin-only",
+
 	// Invites (SPEC-household-basics §7).
 	"POST /api/admin/invites":        "admin-only",
 	"GET /api/admin/invites":         "admin-only",
@@ -263,6 +267,9 @@ func concretePath(w kidWorld, offerID, pattern string) (method, path string) {
 		path = strings.Replace(path, "{id}", w.kidID, 1)
 	case strings.HasPrefix(path, "/api/admin/invites/{id}"):
 		path = strings.Replace(path, "{id}", "00000000-0000-0000-0000-000000000000", 1)
+	case strings.HasPrefix(path, "/api/admin/accounts/{id}"):
+		// A real adult, so a missing admin gate would act on someone.
+		path = strings.Replace(path, "{id}", w.env.UserID, 1)
 	}
 	path = strings.Replace(path, "{variant}", "light", 1)
 	path = strings.Replace(path, "{sid}", "0000", 1)

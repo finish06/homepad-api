@@ -393,3 +393,63 @@ func TestStore_Bind(t *testing.T) {
 		assert.True(t, got.ExpiresAt.Equal(h.clock.Now().Add(lifetime)))
 	})
 }
+
+// SPEC-household-manage-adults §6 — DestroyAllForUser ends every session of
+// one user, except the one whose token is `except` ("" keeps none). It
+// returns how many it ended. Other users' sessions are never touched, and a
+// user id with no sessions (or one that is not an id at all) is 0, not an
+// error. SPEC-password-reset-link uses the same method with its own session
+// as `except`.
+func TestStore_DestroyAllForUser(t *testing.T) {
+	forEachStore(t, func(t *testing.T, h harness) {
+		ctx := context.Background()
+		keep, _, err := h.store.Create(ctx, h.userA, lifetime, "this device")
+		require.NoError(t, err)
+		a2, _, err := h.store.Create(ctx, h.userA, lifetime, "ipad")
+		require.NoError(t, err)
+		a3, _, err := h.store.Create(ctx, h.userA, lifetime, "laptop")
+		require.NoError(t, err)
+		other, _, err := h.store.Create(ctx, h.userB, lifetime, "other user")
+		require.NoError(t, err)
+
+		n, err := h.store.DestroyAllForUser(ctx, h.userA, keep)
+		require.NoError(t, err)
+		assert.Equal(t, int64(2), n, "every session but the kept one ends")
+		for _, tok := range []string{a2, a3} {
+			_, err = h.store.Lookup(ctx, tok)
+			assert.True(t, errors.Is(err, session.ErrNotFound), "an ended session is gone")
+		}
+		_, err = h.store.Lookup(ctx, keep)
+		assert.NoError(t, err, "the except token's session stays")
+		_, err = h.store.Lookup(ctx, other)
+		assert.NoError(t, err, "another user's session is never touched")
+
+		n, err = h.store.DestroyAllForUser(ctx, h.userA, "")
+		require.NoError(t, err)
+		assert.Equal(t, int64(1), n, `except "" keeps none`)
+		_, err = h.store.Lookup(ctx, keep)
+		assert.True(t, errors.Is(err, session.ErrNotFound))
+
+		n, err = h.store.DestroyAllForUser(ctx, h.userA, "")
+		require.NoError(t, err)
+		assert.Equal(t, int64(0), n, "nothing left to end is not an error")
+
+		// An except token that belongs to another user keeps none of A's
+		// sessions, and B's session stays because B is not the one named.
+		b2, _, err := h.store.Create(ctx, h.userA, lifetime, "")
+		require.NoError(t, err)
+		n, err = h.store.DestroyAllForUser(ctx, h.userA, other)
+		require.NoError(t, err)
+		assert.Equal(t, int64(1), n)
+		_, err = h.store.Lookup(ctx, b2)
+		assert.True(t, errors.Is(err, session.ErrNotFound))
+		_, err = h.store.Lookup(ctx, other)
+		assert.NoError(t, err, "B's session survives a call that names A")
+
+		for _, id := range []string{"00000000-0000-0000-0000-0000000000ff", "not-a-uuid", ""} {
+			n, err = h.store.DestroyAllForUser(ctx, id, "")
+			require.NoError(t, err, "DestroyAllForUser(%q)", id)
+			assert.Equal(t, int64(0), n, "DestroyAllForUser(%q)", id)
+		}
+	})
+}
