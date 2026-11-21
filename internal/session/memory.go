@@ -158,3 +158,20 @@ func (m *MemoryStore) DeleteExpired(ctx context.Context) (int64, error) {
 	}
 	return n, nil
 }
+
+func (m *MemoryStore) DestroyAllForUser(ctx context.Context, userID, except string) (int64, error) {
+	var keep [32]byte
+	if except != "" {
+		keep = hashToken(except)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var n int64
+	for h, s := range m.sessions {
+		if s.UserID == userID && (except == "" || h != keep) {
+			delete(m.sessions, h)
+			n++
+		}
+	}
+	return n, nil
+}
