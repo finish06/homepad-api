@@ -28,8 +28,8 @@ import (
 // SHA-256 stored, one 404 for every dead link, the token only in POST bodies.
 
 const (
-	userPassword  = "stitch-user-pw"  // the fixture password of user@homepad.test
-	adminPassword = "stitch-admin-pw" // and of admin@homepad.test
+	// userPassword (adults_test.go) is the fixture password of user@homepad.test.
+	adminPassword = "stitch-admin-pw" // and this is admin@homepad.test's
 	newPassword   = "a brand new password"
 	oidcOnlyHash  = "oidc:no-local-password"
 )
@@ -96,13 +96,6 @@ func loginStatus(t *testing.T, env *testsupport.Env, email, password string) int
 	return r.StatusCode
 }
 
-func meStatus(t *testing.T, env *testsupport.Env, session string) int {
-	t.Helper()
-	r := doJSON(t, http.MethodGet, env.URL+"/api/me", session, nil)
-	readAll(t, r)
-	return r.StatusCode
-}
-
 // seedSSOUser makes an account that only signs in with single sign-on (the
 // OIDC placeholder hash) and gives it a session.
 func seedSSOUser(t *testing.T, env *testsupport.Env, email string) (id, token string) {
@@ -121,15 +114,6 @@ func seedOtherAdmin(t *testing.T, env *testsupport.Env) string {
 	u, err := env.Store.CreateUser(context.Background(), "other-admin@homepad.test", "$2a$04$not-a-real-hash-but-looks-like-one", "admin")
 	require.NoError(t, err)
 	return u.ID
-}
-
-func errorCode(t *testing.T, body []byte) string {
-	t.Helper()
-	var v struct {
-		Error string `json:"error"`
-	}
-	require.NoError(t, json.Unmarshal(body, &v), "a JSON error body: %s", body)
-	return v.Error
 }
 
 // AC-001, AC-011 — the token is 32 CSPRNG bytes as unpadded base64url,
