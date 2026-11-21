@@ -127,6 +127,14 @@ var expectedRouteClasses = map[string]string{
 	"GET /api/admin/invites":         "admin-only",
 	"DELETE /api/admin/invites/{id}": "admin-only",
 
+	// Password reset links and changing your own password
+	// (SPEC-password-reset-link §7). Lookup and accept are public and share
+	// the invite routes' rate limit.
+	"POST /api/admin/accounts/{id}/reset-link": "admin-only",
+	"POST /api/password-resets/lookup":         "public",
+	"POST /api/password-resets/accept":         "public",
+	"POST /api/me/password":                    "kid-forbidden",
+
 	// Backup, restore and Homepage import (SPEC-backup-import §8).
 	"GET /api/admin/export":                   "admin-only",
 	"POST /api/admin/restore/preview":         "admin-only",
