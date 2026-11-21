@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log"
 	"net/http"
 	"os"
@@ -33,6 +34,10 @@ func main() {
 
 	migrated, err := store.MigrateReport(ctx)
 	if err != nil {
+		var stopped *storage.MigrationMessageError
+		if errors.As(err, &stopped) {
+			log.Printf("migrate: %s stopped the upgrade; nothing was changed", stopped.File)
+		}
 		log.Fatalf("migrate: %v", err)
 	}
 	log.Printf("migrations applied (%d new)", len(migrated.Applied))

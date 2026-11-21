@@ -163,6 +163,20 @@ func (r MigrateReport) ArchiveLine() string {
 		r.ArchivedServices, r.ArchivedSections)
 }
 
+// MigrationMessageError is a migration that stopped with RAISE EXCEPTION: a
+// message written for the person running the upgrade, such as 0021's "the
+// catalog has apps but no admin account exists" (AC-009). Error is that
+// message, unchanged; File names the migration; Unwrap gives the Postgres
+// error.
+type MigrationMessageError struct {
+	File string
+	Err  *pgconn.PgError
+}
+
+func (e *MigrationMessageError) Error() string { return e.Err.Message }
+
+func (e *MigrationMessageError) Unwrap() error { return e.Err }
+
 // Migrate applies the embedded migrations that have not run yet. See
 // MigrateReport.
 func (s *Store) Migrate(ctx context.Context) error {
@@ -227,10 +241,10 @@ func (s *Store) migrate(ctx context.Context, fsys fs.FS) (MigrateReport, error) 
 		}
 		if _, err := tx.Exec(ctx, string(sqlBytes)); err != nil {
 			// A RAISE EXCEPTION in a migration is a message for the person
-			// running the upgrade (AC-009): pass it on as it is.
+			// running the upgrade (AC-009): its text is passed on as it is.
 			var pgErr *pgconn.PgError
 			if errors.As(err, &pgErr) && pgErr.Code == "P0001" {
-				return rep, errors.New(pgErr.Message)
+				return rep, &MigrationMessageError{File: name, Err: pgErr}
 			}
 			return rep, fmt.Errorf("storage.Migrate: %s: %w", name, err)
 		}
