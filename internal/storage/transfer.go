@@ -50,17 +50,19 @@ type TransferSection struct {
 
 // TransferApp is one service of the shared catalog.
 type TransferApp struct {
-	ID              string
-	Slug            string
-	Name            string
-	Description     string
-	URL             string
-	Icon            string
-	GatusKey        string
-	ClickAction     string
-	SectionID       *string
-	SourceLibraryID *string
-	Icons           []TransferIcon // light before dark
+	ID          string
+	Slug        string
+	Name        string
+	Description string
+	URL         string
+	Icon        string
+	GatusKey    string
+	ClickAction string
+	// IframeSameOrigin is the overlay's sign-in opt-in (SPEC-iframe-sandbox-optin).
+	IframeSameOrigin bool
+	SectionID        *string
+	SourceLibraryID  *string
+	Icons            []TransferIcon // light before dark
 }
 
 // TransferIcon is one uploaded icon variant. Bytes is filled only when the
@@ -119,7 +121,10 @@ type TransferAppRow struct {
 	Icon        string
 	GatusKey    string // "" = unmonitored (NULL)
 	ClickAction string
-	SectionID   *string
+	// IframeSameOrigin nil leaves an existing app's value alone, and a new
+	// app gets FALSE (SPEC-iframe-sandbox-optin AC-011).
+	IframeSameOrigin *bool
+	SectionID        *string
 }
 
 // TransferOfferRow is the desired state of an App Library offer.
@@ -173,10 +178,10 @@ func loadTransferState(ctx context.Context, q querier, in TransferLoad) (*Transf
 	}
 	appIdx := map[string]int{}
 	err = collect(ctx, q, `SELECT id, slug, name, description, url, icon, COALESCE(gatus_key, ''), click_action,
-		category_id, source_library_id FROM services ORDER BY slug`, nil, func(r pgx.Rows) error {
+		iframe_same_origin, category_id, source_library_id FROM services ORDER BY slug`, nil, func(r pgx.Rows) error {
 		var x TransferApp
 		err := r.Scan(&x.ID, &x.Slug, &x.Name, &x.Description, &x.URL, &x.Icon, &x.GatusKey, &x.ClickAction,
-			&x.SectionID, &x.SourceLibraryID)
+			&x.IframeSameOrigin, &x.SectionID, &x.SourceLibraryID)
 		appIdx[x.ID] = len(st.Apps)
 		st.Apps = append(st.Apps, x)
 		return err
@@ -423,9 +428,10 @@ func (t *TransferTx) UpdateOffer(ctx context.Context, id string, o TransferOffer
 
 func (t *TransferTx) CreateApp(ctx context.Context, a TransferAppRow) (string, error) {
 	var id string
-	err := t.tx.QueryRow(ctx, `INSERT INTO services (slug, name, description, url, icon, gatus_key, click_action, category_id)
-		VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), $7, $8) RETURNING id`,
-		a.Slug, a.Name, a.Description, a.URL, a.Icon, a.GatusKey, a.ClickAction, a.SectionID).Scan(&id)
+	err := t.tx.QueryRow(ctx, `INSERT INTO services (slug, name, description, url, icon, gatus_key, click_action, category_id,
+		iframe_same_origin)
+		VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), $7, $8, COALESCE($9, FALSE)) RETURNING id`,
+		a.Slug, a.Name, a.Description, a.URL, a.Icon, a.GatusKey, a.ClickAction, a.SectionID, a.IframeSameOrigin).Scan(&id)
 	if err != nil {
 		return "", fmt.Errorf("storage: transfer create app: %w", err)
 	}
@@ -434,9 +440,10 @@ func (t *TransferTx) CreateApp(ctx context.Context, a TransferAppRow) (string, e
 
 func (t *TransferTx) UpdateApp(ctx context.Context, id string, a TransferAppRow) error {
 	return t.exec1(ctx, "update app", `UPDATE services SET slug = $2, name = $3, description = $4, url = $5, icon = $6,
-		gatus_key = NULLIF($7, ''), click_action = $8, category_id = $9, updated_at = now()
+		gatus_key = NULLIF($7, ''), click_action = $8, category_id = $9,
+		iframe_same_origin = COALESCE($10, iframe_same_origin), updated_at = now()
 		WHERE id = $1`,
-		id, a.Slug, a.Name, a.Description, a.URL, a.Icon, a.GatusKey, a.ClickAction, a.SectionID)
+		id, a.Slug, a.Name, a.Description, a.URL, a.Icon, a.GatusKey, a.ClickAction, a.SectionID, a.IframeSameOrigin)
 }
 
 // SetGatusKey fills an app's EMPTY status key, and nothing else (§4.3).

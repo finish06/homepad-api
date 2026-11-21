@@ -547,7 +547,7 @@ func PlanRestore(st *storage.TransferState, d *Decoded, mode string) *Plan {
 		}
 		it.Section = section
 		row := storage.TransferAppRow{Slug: slug, Name: name, Description: a.Description, URL: url, Icon: icon,
-			GatusKey: gatus, ClickAction: click}
+			GatusKey: gatus, ClickAction: click, IframeSameOrigin: a.IframeSameOrigin}
 
 		cur, exists := curBySlug[slug]
 		var iconItems []Item
@@ -609,6 +609,8 @@ func PlanRestore(st *storage.TransferState, d *Decoded, mode string) *Plan {
 				{"icon", cur.Icon != row.Icon},
 				{"section", deref(curSec) != deref(section) || (curSec == nil) != (section == nil)},
 				{"clickAction", cur.ClickAction != row.ClickAction},
+				// A file without the field leaves the app's value alone (AC-011).
+				{"iframeSameOrigin", row.IframeSameOrigin != nil && *row.IframeSameOrigin != cur.IframeSameOrigin},
 				{"gatusKey", cur.GatusKey != row.GatusKey},
 			} {
 				if c.diff {
@@ -1121,6 +1123,8 @@ func PlanImport(st *storage.TransferState, hp *Homepage, gatusKeys map[string]bo
 			o.apps = append(o.apps, appOp{section: sectionPtr, row: storage.TransferAppRow{
 				Slug: slug, Name: e.Name, Description: e.Description, URL: href, Icon: icon.URL,
 				GatusKey: gatus, ClickAction: ClickActionFor(e.Target, hp.Target),
+				// SPEC-iframe-sandbox-optin AC-012 — imported apps start strict.
+				IframeSameOrigin: new(bool),
 			}})
 			created = append(created, slug)
 			creates++

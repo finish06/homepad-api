@@ -105,6 +105,10 @@ type Service struct {
 	// ClickAction (v23) is the tile's click behavior: 'new_tab' | 'same_tab' |
 	// 'iframe'. Always populated — the DB column is NOT NULL DEFAULT 'new_tab'.
 	ClickAction string
+	// IframeSameOrigin (SPEC-iframe-sandbox-optin) is "Let this app keep its
+	// sign-in": the overlay adds allow-same-origin to its sandbox only when it
+	// is on. NOT NULL DEFAULT FALSE.
+	IframeSameOrigin bool
 }
 
 // Category is an admin-curated catalog section (v4). Ordering is the explicit
@@ -377,7 +381,7 @@ func (s *Store) SetShowHealthBar(ctx context.Context, userID string, show bool) 
 func (s *Store) ListServices(ctx context.Context, viewerID string) ([]Service, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT s.id, s.slug, s.name, s.description, s.url, s.icon, COALESCE(s.gatus_key, ''),
-		        s.category_id, c.name, s.source_library_id, s.click_action
+		        s.category_id, c.name, s.source_library_id, s.click_action, s.iframe_same_origin
 		   FROM services s
 		   LEFT JOIN user_layout ul ON ul.service_id = s.id AND ul.user_id = $1
 		   LEFT JOIN categories c   ON c.id = s.category_id
@@ -391,7 +395,7 @@ func (s *Store) ListServices(ctx context.Context, viewerID string) ([]Service, e
 	for rows.Next() {
 		var sv Service
 		if err := rows.Scan(&sv.ID, &sv.Slug, &sv.Name, &sv.Description, &sv.URL, &sv.Icon, &sv.GatusKey,
-			&sv.CategoryID, &sv.CategoryName, &sv.SourceLibraryID, &sv.ClickAction); err != nil {
+			&sv.CategoryID, &sv.CategoryName, &sv.SourceLibraryID, &sv.ClickAction, &sv.IframeSameOrigin); err != nil {
 			return nil, err
 		}
 		out = append(out, sv)
@@ -415,11 +419,11 @@ func (s *Store) CreateService(ctx context.Context, in Service) (Service, error) 
 	}
 	var sv Service
 	err := s.pool.QueryRow(ctx,
-		`INSERT INTO services (slug, name, description, url, icon, gatus_key, click_action)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7)
-		 RETURNING id, slug, name, description, url, icon, COALESCE(gatus_key, ''), click_action`,
-		in.Slug, in.Name, in.Description, in.URL, in.Icon, gatusKey, clickAction,
-	).Scan(&sv.ID, &sv.Slug, &sv.Name, &sv.Description, &sv.URL, &sv.Icon, &sv.GatusKey, &sv.ClickAction)
+		`INSERT INTO services (slug, name, description, url, icon, gatus_key, click_action, iframe_same_origin)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		 RETURNING id, slug, name, description, url, icon, COALESCE(gatus_key, ''), click_action, iframe_same_origin`,
+		in.Slug, in.Name, in.Description, in.URL, in.Icon, gatusKey, clickAction, in.IframeSameOrigin,
+	).Scan(&sv.ID, &sv.Slug, &sv.Name, &sv.Description, &sv.URL, &sv.Icon, &sv.GatusKey, &sv.ClickAction, &sv.IframeSameOrigin)
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 		return Service{}, ErrSlugTaken
@@ -448,6 +452,8 @@ type ServiceUpdate struct {
 	// ClickAction (v23) is nil = leave unchanged; a non-nil pointer sets the tile's
 	// click behavior. The API validates the enum before it reaches here.
 	ClickAction *string
+	// IframeSameOrigin (SPEC-iframe-sandbox-optin) is nil = leave unchanged.
+	IframeSameOrigin *bool
 }
 
 // UpdateService applies a partial patch to a catalog app and returns the
@@ -481,17 +487,20 @@ func (s *Store) UpdateService(ctx context.Context, id string, in ServiceUpdate) 
 		     gatus_key    = CASE WHEN $7 THEN $8 ELSE gatus_key END,
 		     category_id  = CASE WHEN $9 THEN $10 ELSE category_id END,
 		     click_action = COALESCE($11, click_action),
+		     iframe_same_origin = COALESCE($12, iframe_same_origin),
 		     updated_at   = now()
 		   WHERE id = $1
-		   RETURNING id, slug, name, description, url, icon, gatus_key, category_id, source_library_id, click_action
+		   RETURNING id, slug, name, description, url, icon, gatus_key, category_id, source_library_id, click_action,
+		             iframe_same_origin
 		 )
 		 SELECT u.id, u.slug, u.name, u.description, u.url, u.icon, COALESCE(u.gatus_key, ''),
-		        u.category_id, c.name, u.source_library_id, u.click_action
+		        u.category_id, c.name, u.source_library_id, u.click_action, u.iframe_same_origin
 		   FROM updated u
 		   LEFT JOIN categories c ON c.id = u.category_id`,
 		id, in.Slug, in.Name, in.Description, in.URL, in.Icon, setGatus, gatusKey, in.SetCategory, in.CategoryID, in.ClickAction,
+		in.IframeSameOrigin,
 	).Scan(&sv.ID, &sv.Slug, &sv.Name, &sv.Description, &sv.URL, &sv.Icon, &sv.GatusKey,
-		&sv.CategoryID, &sv.CategoryName, &sv.SourceLibraryID, &sv.ClickAction)
+		&sv.CategoryID, &sv.CategoryName, &sv.SourceLibraryID, &sv.ClickAction, &sv.IframeSameOrigin)
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) {
 		if pgErr.Code == "23505" {

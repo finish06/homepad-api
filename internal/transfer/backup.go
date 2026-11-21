@@ -65,15 +65,21 @@ type Section struct {
 
 // App is one catalog app. Section nil is Uncategorized.
 type App struct {
-	Slug          string        `json:"slug"`
-	Name          string        `json:"name"`
-	Description   string        `json:"description"`
-	URL           string        `json:"url"`
-	Icon          string        `json:"icon"`
-	Section       *string       `json:"section"`
-	ClickAction   string        `json:"clickAction"`
-	GatusKey      *string       `json:"gatusKey"`
-	UploadedIcons UploadedIcons `json:"uploadedIcons"`
+	Slug        string  `json:"slug"`
+	Name        string  `json:"name"`
+	Description string  `json:"description"`
+	URL         string  `json:"url"`
+	Icon        string  `json:"icon"`
+	Section     *string `json:"section"`
+	ClickAction string  `json:"clickAction"`
+	// IframeSameOrigin is the overlay's sign-in opt-in
+	// (SPEC-iframe-sandbox-optin AC-011). Every export writes it. It is
+	// optional in a v2 file, so it didn't bump the version: nil (a 17.1.0
+	// file, or one that leaves it out) leaves an existing app's value alone,
+	// and a new app gets false.
+	IframeSameOrigin *bool         `json:"iframeSameOrigin,omitempty"`
+	GatusKey         *string       `json:"gatusKey"`
+	UploadedIcons    UploadedIcons `json:"uploadedIcons"`
 }
 
 // UploadedIcons holds up to two variants.
@@ -165,7 +171,7 @@ func BuildFile(st *storage.TransferState, includePeople bool, version string, no
 		slugOf[a.ID] = a.Slug
 		out := App{
 			Slug: a.Slug, Name: a.Name, Description: a.Description, URL: a.URL, Icon: a.Icon,
-			ClickAction: a.ClickAction,
+			ClickAction: a.ClickAction, IframeSameOrigin: boolPtr(a.IframeSameOrigin),
 		}
 		if out.ClickAction == "" {
 			out.ClickAction = "new_tab"
@@ -417,7 +423,7 @@ var (
 		"sections": arr(obj(map[string]*shape{"name": nil, "gridWidth": nil})),
 		"apps": arr(obj(map[string]*shape{
 			"slug": nil, "name": nil, "description": nil, "url": nil, "icon": nil, "section": nil,
-			"clickAction": nil, "gatusKey": nil,
+			"clickAction": nil, "iframeSameOrigin": nil, "gatusKey": nil,
 			"uploadedIcons": obj(map[string]*shape{"light": iconShape, "dark": iconShape}),
 		})),
 		"library": arr(obj(map[string]*shape{"name": nil, "url": nil, "icon": nil, "description": nil, "suggestedCategory": nil})),

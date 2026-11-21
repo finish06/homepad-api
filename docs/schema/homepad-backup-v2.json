@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/finish06/homepad-api/blob/main/docs/schema/homepad-backup-v2.json",
   "title": "Homepad backup, schema version 2",
-  "description": "The file GET /api/admin/export writes from Homepad 18.0.0 on (SPEC-backup-import §3, SPEC-household-catalog-owner Q5). Version 2 has the same keys as version 1. Homepad 18.0.0 reads both; Homepad 17.x refuses version 2 as a file from a newer Homepad. It holds no database ids, password hashes, sessions, OIDC config, env config or the Gatus URL. References use app slugs, section names, adult emails and kid names.",
+  "description": "The file GET /api/admin/export writes from Homepad 18.0.0 on (SPEC-backup-import §3, SPEC-household-catalog-owner Q5). Version 2 has the same keys as version 1, plus the optional iframeSameOrigin on each app (Homepad 18.0.0). Homepad 18.0.0 reads both; Homepad 17.x refuses version 2 as a file from a newer Homepad. It holds no database ids, password hashes, sessions, OIDC config, env config or the Gatus URL. References use app slugs, section names, adult emails and kid names.",
   "type": "object",
   "required": ["format", "schemaVersion", "exportedAt", "homepadVersion", "includesPeople", "settings", "sections", "apps", "library"],
   "additionalProperties": false,
@@ -78,6 +78,7 @@
         "icon": { "type": "string" },
         "section": { "type": ["string", "null"] },
         "clickAction": { "enum": ["new_tab", "same_tab", "iframe"] },
+        "iframeSameOrigin": { "type": "boolean", "description": "Let this app keep its sign-in in the overlay (SPEC-iframe-sandbox-optin). Optional: a file without it leaves an existing app's value alone, and a new app gets false." },
         "gatusKey": { "type": ["string", "null"] },
         "uploadedIcons": {
           "type": "object",
