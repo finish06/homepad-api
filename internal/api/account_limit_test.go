@@ -108,8 +108,8 @@ func TestAccountLimit_OIDCAutoCreate(t *testing.T) {
 	_, err := store.CreateUser(ctx, "owner@example.com", "x", "admin")
 	require.NoError(t, err)
 
-	code := runOIDCLoginStatus(t, homepad, idp)
-	assert.Equal(t, http.StatusConflict, code, "a new OIDC identity at the cap is refused")
+	code := signinError(t, oidcCallback(t, homepad, idp))
+	assert.Equal(t, "account_limit", code, "a new OIDC identity at the cap is refused (SPEC-signin-hardening AC-002)")
 	_, err = store.UserByEmail(ctx, "new@example.com")
 	assert.Error(t, err, "no account was created")
 
