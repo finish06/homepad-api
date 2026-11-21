@@ -179,6 +179,24 @@ func (p *PgStore) DeleteExpired(ctx context.Context) (int64, error) {
 	return tag.RowsAffected(), nil
 }
 
+func (p *PgStore) DestroyAllForUser(ctx context.Context, userID, except string) (int64, error) {
+	// A nil keep is SQL NULL, and every hash IS DISTINCT FROM NULL: none kept.
+	var keep []byte
+	if except != "" {
+		h := hashToken(except)
+		keep = h[:]
+	}
+	tag, err := p.pool.Exec(ctx,
+		`DELETE FROM sessions WHERE user_id = $1 AND token_hash IS DISTINCT FROM $2`, userID, keep)
+	if isInvalidText(err) {
+		return 0, nil // not a user id at all, so no sessions
+	}
+	if err != nil {
+		return 0, fmt.Errorf("session: destroy all for user: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
 func scanSession(row pgx.Row) (Session, error) {
 	var s Session
 	err := row.Scan(&s.Handle, &s.UserID, &s.CreatedAt, &s.LastSeenAt, &s.ExpiresAt, &s.UserAgent)

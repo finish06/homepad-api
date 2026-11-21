@@ -237,6 +237,10 @@ func (s *server) routes(d Deps) (http.Handler, []registeredRoute) {
 	rt.handle("DELETE /api/admin/kids/{id}/sessions/{sid}", classAdminOnly, s.handleRevokeKidSession)
 	rt.handle("POST /api/admin/kids/{id}/sign-in-here", classAdminOnly, s.handleSignInHere)
 
+	// SPEC-household-manage-adults §7 — change an adult's role, remove an adult.
+	rt.handle(patchAdultRoute, classAdminOnly, s.handlePatchAdult)
+	rt.handle(removeAdultRoute, classAdminOnly, s.handleRemoveAdult)
+
 	// SPEC-household-basics §7 — invites. Making, listing and revoking are
 	// admin-only; the link's two routes are public and share one rate limit.
 	rt.handle("POST /api/admin/invites", classAdminOnly, s.handleCreateInvite)

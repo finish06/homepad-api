@@ -92,6 +92,12 @@ type Store interface {
 	RevokeByHandle(ctx context.Context, userID, handle string) error
 	// DeleteExpired removes every expired session and returns how many.
 	DeleteExpired(ctx context.Context) (int64, error)
+	// DestroyAllForUser deletes every session of userID except the one whose
+	// token is except ("" keeps none), and returns how many it deleted. An id
+	// with no sessions, or one that is not an id at all, is 0 and no error.
+	// SPEC-household-manage-adults (a role change) and
+	// SPEC-password-reset-link (a reset or a password change) use it.
+	DestroyAllForUser(ctx context.Context, userID, except string) (int64, error)
 }
 
 // newToken returns 256 bits of crypto randomness, URL-safe base64 (cookie-safe).
