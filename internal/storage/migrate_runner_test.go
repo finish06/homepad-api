@@ -2,12 +2,14 @@ package storage_test
 
 import (
 	"context"
+	"errors"
 	"io/fs"
 	"sort"
 	"testing"
 	"testing/fstest"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -148,4 +150,25 @@ func rerunMigration(t *testing.T, ctx context.Context, store *storage.Store, nam
 	rep, err := store.MigrateReport(ctx)
 	require.NoError(t, err)
 	require.Equal(t, []string{name}, rep.Applied, "only the forgotten file runs")
+}
+
+// AC-009 (QA on #101) — a RAISE in a migration reaches the boot as its own
+// words, and still names the file and wraps the Postgres error.
+func TestMigrate_ARaiseKeepsItsTextAndNamesTheFile(t *testing.T) {
+	ctx, conn, store := freshStore(t, "homepad_runner_raise_test")
+	raise := fstest.MapFS{
+		"0001_ok.up.sql":    {Data: []byte(`CREATE TABLE runner_ok (id int);`)},
+		"0002_raise.up.sql": {Data: []byte(`DO $$ BEGIN RAISE EXCEPTION 'migration 0002: make one account an admin, then restart.'; END $$;`)},
+	}
+	_, err := store.MigrateFS(ctx, raise)
+	require.Error(t, err)
+	assert.Equal(t, "migration 0002: make one account an admin, then restart.", err.Error(), "the text is the message, unchanged")
+
+	var me *storage.MigrationMessageError
+	require.True(t, errors.As(err, &me), "a *storage.MigrationMessageError, got %T", err)
+	assert.Equal(t, "0002_raise.up.sql", me.File)
+	var pgErr *pgconn.PgError
+	require.True(t, errors.As(err, &pgErr), "it wraps the Postgres error")
+	assert.Equal(t, "P0001", pgErr.Code)
+	assert.False(t, tableExists(t, ctx, conn, "runner_ok"), "nothing ran")
 }
