@@ -160,7 +160,10 @@ func TestRegister_FirstAccountIsAdminInEveryMode(t *testing.T) {
 func TestRegister_ConcurrentBootstrapMakesOneAdmin(t *testing.T) {
 	for _, mode := range []api.RegistrationMode{api.RegistrationClosed, api.RegistrationOpen} {
 		t.Run(fmt.Sprintf("mode %d", mode), func(t *testing.T) {
-			env := testsupport.NewEnvWith(t, testsupport.Options{Empty: true, Registration: modePtr(mode)})
+			// The race is the point here, not the sign-in limits
+			// (SPEC-signin-hardening): ten registers from one client.
+			env := testsupport.NewEnvWith(t, testsupport.Options{Empty: true, Registration: modePtr(mode),
+				Limits: api.Limits{Register: roomyClient}})
 			const n = 10
 			codes := make([]int, n)
 			roles := make([]string, n)

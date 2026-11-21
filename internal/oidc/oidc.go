@@ -27,13 +27,16 @@ import (
 // from the environment (see ConfigFromEnv) so real values are wired at deploy.
 type Config struct {
 	Enabled      bool
-	DiscoveryURL string   // OIDC_DISCOVERY_URL; if empty, derived from Issuer.
-	Issuer       string   // OIDC_ISSUER; also the expected `iss` of the ID token.
-	ClientID     string   // OIDC_CLIENT_ID
-	ClientSecret string   // OIDC_CLIENT_SECRET
-	RedirectURL  string   // OIDC_REDIRECT_URL (the /api/auth/oidc/callback URL)
-	AdminGroup   string   // OIDC_ADMIN_GROUP; members get the homepad admin role.
-	Scopes       []string // defaults to openid profile email groups
+	DiscoveryURL string // OIDC_DISCOVERY_URL; if empty, derived from Issuer.
+	Issuer       string // OIDC_ISSUER; also the expected `iss` of the ID token.
+	ClientID     string // OIDC_CLIENT_ID
+	ClientSecret string // OIDC_CLIENT_SECRET
+	RedirectURL  string // OIDC_REDIRECT_URL (the /api/auth/oidc/callback URL)
+	AdminGroup   string // OIDC_ADMIN_GROUP; members get the homepad admin role.
+	// MemberGroup is OIDC_MEMBER_GROUP: under invite_only, a new identity in
+	// it gets a member account (SPEC-signin-hardening §2.5). Unset: none.
+	MemberGroup string
+	Scopes      []string // defaults to openid profile email groups
 }
 
 // ConfigFromEnv reads the OIDC_* environment variables. OIDC is off unless
@@ -47,6 +50,7 @@ func ConfigFromEnv() Config {
 		ClientSecret: os.Getenv("OIDC_CLIENT_SECRET"),
 		RedirectURL:  os.Getenv("OIDC_REDIRECT_URL"),
 		AdminGroup:   os.Getenv("OIDC_ADMIN_GROUP"),
+		MemberGroup:  os.Getenv("OIDC_MEMBER_GROUP"),
 		Scopes:       []string{"openid", "profile", "email", "groups"},
 	}
 	return c

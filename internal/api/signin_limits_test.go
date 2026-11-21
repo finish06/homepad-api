@@ -4,12 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -57,40 +54,17 @@ func requireTooMany(t *testing.T, code int, h http.Header, body string) int {
 	return retry
 }
 
-// captureLog sends the standard logger to a buffer for the test.
-func captureLog(t *testing.T) *syncBuf {
-	t.Helper()
-	buf := &syncBuf{}
-	log.SetOutput(buf)
-	t.Cleanup(func() { log.SetOutput(os.Stderr) })
-	return buf
-}
-
-type syncBuf struct {
-	mu sync.Mutex
-	b  bytes.Buffer
-}
-
-func (s *syncBuf) Write(p []byte) (int, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.b.Write(p)
-}
-
-func (s *syncBuf) String() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.b.String()
-}
-
 // AC-004, AC-007, TC-002 — login: 10 a minute per client, burst 10. With
 // HOMEPAD_TRUSTED_PROXIES unset, a different forged X-Forwarded-For on every
 // try changes nothing: the 11th is 429.
+//
+// The first ten tries are refused before bcrypt (a password under 8
+// characters), so they take no time and no token refills before the 11th.
 func TestLogin_PerClientLimit_IgnoresForgedHeader(t *testing.T) {
 	env := testsupport.NewEnv(t)
 	for i := 0; i < 10; i++ {
-		code, _, body := login(t, env, fmt.Sprintf("198.51.100.%d", i+1), fmt.Sprintf("nobody%d@example.com", i), "not the password")
-		require.Equal(t, http.StatusUnauthorized, code, "try %d: %s", i+1, body)
+		code, _, body := login(t, env, fmt.Sprintf("198.51.100.%d", i+1), fmt.Sprintf("nobody%d@example.com", i), "short")
+		require.Equal(t, http.StatusBadRequest, code, "try %d: %s", i+1, body)
 	}
 	code, h, body := login(t, env, "198.51.100.99", "alice@example.com", "correct horse battery staple")
 	requireTooMany(t, code, h, body)
@@ -203,7 +177,8 @@ func TestLogin_SuccessClearsTheCount(t *testing.T) {
 }
 
 // AC-006 — the bcrypt routes share one process-wide ceiling, whatever the
-// client keys are.
+// client keys are. A slow refill keeps bcrypt's own time from refilling it
+// mid-test; the 120-a-minute default is checked in DefaultLimits.
 func TestLimits_ProcessCeilingIsShared(t *testing.T) {
 	routes := []struct {
 		path string
@@ -221,7 +196,7 @@ func TestLimits_ProcessCeilingIsShared(t *testing.T) {
 			env := testsupport.NewEnvWith(t, testsupport.Options{
 				InviteLimit: roomyLimit,
 				Limits: api.Limits{Login: roomyClient, Register: roomyClient, Invite: roomyClient, Reset: roomyClient,
-					Ceiling: api.RateLimit{PerMinute: 120, Burst: 2}},
+					Ceiling: api.RateLimit{PerMinute: 1, Burst: 2}},
 			})
 			// Two other bcrypt routes spend the ceiling…
 			code, _, _ := login(t, env, "", "user@homepad.test", "not the password")
@@ -237,7 +212,7 @@ func TestLimits_ProcessCeilingIsShared(t *testing.T) {
 
 // AC-006 — the ceiling doesn't reach the authenticated routes.
 func TestLimits_CeilingLeavesOtherRoutesAlone(t *testing.T) {
-	env := testsupport.NewEnvWith(t, testsupport.Options{Limits: api.Limits{Ceiling: api.RateLimit{PerMinute: 120, Burst: 1}}})
+	env := testsupport.NewEnvWith(t, testsupport.Options{Limits: api.Limits{Ceiling: api.RateLimit{PerMinute: 1, Burst: 1}}})
 	code, _, _ := login(t, env, "", "user@homepad.test", "not the password")
 	require.Equal(t, http.StatusUnauthorized, code)
 	code, _, _ = login(t, env, "", "user@homepad.test", "not the password")
@@ -251,17 +226,20 @@ func TestLogin_TrustedProxy_TellsClientsApart(t *testing.T) {
 	tp, err := api.ParseTrustedProxies("127.0.0.1")
 	require.NoError(t, err)
 	env := testsupport.NewEnvWith(t, testsupport.Options{TrustedProxies: tp})
+	// Short passwords are refused before bcrypt, so no token refills mid-test.
 	for i := 0; i < 10; i++ {
-		code, _, _ := login(t, env, "198.51.100.1", fmt.Sprintf("a%d@example.com", i), "not the password")
-		require.Equal(t, http.StatusUnauthorized, code)
+		code, _, _ := login(t, env, "198.51.100.1", fmt.Sprintf("a%d@example.com", i), "short")
+		require.Equal(t, http.StatusBadRequest, code)
 	}
 	code, _, _ := login(t, env, "198.51.100.1", "a@example.com", "not the password")
 	require.Equal(t, http.StatusTooManyRequests, code, "laptop one is out")
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 9; i++ {
 		// A forged left-hand entry doesn't move laptop two into laptop one's bucket.
-		code, _, body := login(t, env, "198.51.100.1, 198.51.100.2", fmt.Sprintf("b%d@example.com", i), "not the password")
-		require.Equal(t, http.StatusUnauthorized, code, "laptop two, try %d: %s", i+1, body)
+		code, _, body := login(t, env, "198.51.100.1, 198.51.100.2", fmt.Sprintf("b%d@example.com", i), "short")
+		require.Equal(t, http.StatusBadRequest, code, "laptop two, try %d: %s", i+1, body)
 	}
+	code, _, body := login(t, env, "198.51.100.2", "b@example.com", "not the password")
+	assert.Equal(t, http.StatusUnauthorized, code, "laptop two's tenth try gets a real answer: %s", body)
 }
 
 // AC-008 — set, but the peer is not in it: the header is ignored.
@@ -270,8 +248,8 @@ func TestLogin_UntrustedPeer_HeaderIgnored(t *testing.T) {
 	require.NoError(t, err)
 	env := testsupport.NewEnvWith(t, testsupport.Options{TrustedProxies: tp})
 	for i := 0; i < 10; i++ {
-		code, _, _ := login(t, env, fmt.Sprintf("198.51.100.%d", i+1), fmt.Sprintf("a%d@example.com", i), "not the password")
-		require.Equal(t, http.StatusUnauthorized, code)
+		code, _, _ := login(t, env, fmt.Sprintf("198.51.100.%d", i+1), fmt.Sprintf("a%d@example.com", i), "short")
+		require.Equal(t, http.StatusBadRequest, code)
 	}
 	code, _, _ := login(t, env, "198.51.100.200", "a@example.com", "not the password")
 	assert.Equal(t, http.StatusTooManyRequests, code)
@@ -281,7 +259,9 @@ func TestLogin_UntrustedPeer_HeaderIgnored(t *testing.T) {
 // the lock without the email. No email is ever logged.
 func TestLimits_LogLines(t *testing.T) {
 	buf := captureLog(t)
-	env := testsupport.NewEnvWith(t, testsupport.Options{Limits: api.Limits{Login: api.RateLimit{PerMinute: 10, Burst: 12}}})
+	// Burst 12 with a slow refill: ten failures, two locked tries, then the
+	// client limit.
+	env := testsupport.NewEnvWith(t, testsupport.Options{Limits: api.Limits{Login: api.RateLimit{PerMinute: 1, Burst: 12}}})
 	for i := 0; i < 12; i++ {
 		login(t, env, "", "secret-person@example.com", "not the password")
 	}

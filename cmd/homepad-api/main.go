@@ -107,6 +107,22 @@ func main() {
 		log.Printf("accounts: limit %d (HOMEPAD_MAX_ACCOUNTS)", maxAccounts)
 	}
 
+	// HOMEPAD_TRUSTED_PROXIES (SPEC-signin-hardening §2.2): the proxies whose
+	// X-Forwarded-For the sign-in limits believe. Unset trusts none, so
+	// behind a proxy every client shares one limit. Junk stops the API, like
+	// HOMEPAD_MAX_ACCOUNTS. Hostnames resolve now and every 5 minutes.
+	trusted, err := api.ParseTrustedProxies(os.Getenv("HOMEPAD_TRUSTED_PROXIES"))
+	if err != nil {
+		log.Fatalf("config: %v", err)
+	}
+	if trusted.Size() == 0 {
+		log.Printf("sign-in limits: HOMEPAD_TRUSTED_PROXIES is unset, so X-Forwarded-For is ignored; behind a proxy, every client shares one limit")
+	} else {
+		trusted.Refresh(ctx)
+		go trusted.Run(ctx, api.TrustedRefreshEvery)
+		log.Printf("sign-in limits: trusting X-Forwarded-For from %d HOMEPAD_TRUSTED_PROXIES entries", trusted.Size())
+	}
+
 	// Sessions persist in Postgres (migration 0017), so a restart or deploy no
 	// longer signs anyone out. The sweeper deletes expired rows hourly; main
 	// waits for it to stop before the deferred store.Close.
@@ -155,17 +171,18 @@ func main() {
 	}()
 
 	h := api.New(api.Deps{
-		Store:        store,
-		Poller:       poller,
-		Sessions:     sessions,
-		Registration: regMode,
-		OIDC:         oidc.ConfigFromEnv(),
-		MaxAccounts:  maxAccounts,
-		Widgets:      widgetManager,
-		Weather:      weather,
-		Sealer:       sealer,
-		WidgetKinds:  widgetKinds,
-		Outbound:     outbound,
+		Store:          store,
+		Poller:         poller,
+		Sessions:       sessions,
+		Registration:   regMode,
+		OIDC:           oidc.ConfigFromEnv(),
+		MaxAccounts:    maxAccounts,
+		TrustedProxies: trusted,
+		Widgets:        widgetManager,
+		Weather:        weather,
+		Sealer:         sealer,
+		WidgetKinds:    widgetKinds,
+		Outbound:       outbound,
 	})
 
 	srv := &http.Server{Addr: ":" + envOr("PORT", "8080"), Handler: h}

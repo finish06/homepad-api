@@ -42,7 +42,10 @@ type resetCreated struct {
 
 func resetEnv(t *testing.T) *testsupport.Env {
 	t.Helper()
-	return testsupport.NewEnvWith(t, testsupport.Options{InviteLimit: roomyLimit})
+	// Some tests here make many public calls on purpose: keep the per-client
+	// limits and the process ceiling (SPEC-signin-hardening) out of the way.
+	return testsupport.NewEnvWith(t, testsupport.Options{InviteLimit: roomyLimit,
+		Limits: api.Limits{Login: roomyClient, Ceiling: roomyClient}})
 }
 
 func createResetLink(t *testing.T, env *testsupport.Env, session, id string) (int, resetCreated, []byte) {

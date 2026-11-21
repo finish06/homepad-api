@@ -151,11 +151,32 @@ func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// SPEC-signin-hardening AC-005 — after loginFailPolicy.max failures in
+	// its window, an email is locked: 429 whether or not the password is
+	// right, and whether or not the email has an account, so the answer
+	// reveals nothing. The lock touches password sign-in only.
+	key := loginFailKey(c.Email)
+	if wait, logIt := s.loginFails.lockedLog(key); wait > 0 {
+		if logIt {
+			log.Printf("ratelimit: login locked for an email")
+		}
+		tooMany(w, wait)
+		return
+	}
+
 	u, err := s.store.UserByEmail(r.Context(), c.Email)
 	if !s.loginPasswordOK(u, err, c.Password) {
+		// A failed lookup is the server's fault, not a guess: don't count it.
+		if err == nil || errors.Is(err, storage.ErrNotFound) {
+			s.loginFails.fail(key)
+			if _, logIt := s.loginFails.lockedLog(key); logIt {
+				log.Printf("ratelimit: login locked for an email")
+			}
+		}
 		http.Error(w, "invalid email or password", http.StatusUnauthorized)
 		return
 	}
+	s.loginFails.clear(key)
 
 	if !s.startSession(w, r, u) {
 		return

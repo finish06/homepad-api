@@ -22,7 +22,7 @@ import (
 // one-time token, returned once. The web app puts it in a URL fragment
 // (/#invite=…), so it never reaches an access log; the API only ever receives
 // it in POST bodies. Only sha256(token) is stored. Lookup and accept are
-// public, share one rate limit, and answer every dead token (unknown,
+// public, share one per-client limit, and answer every dead token (unknown,
 // malformed, expired, used, revoked) with the same 404.
 
 // inviteTTL is how long an invite works (Q4: 7 days, fixed).

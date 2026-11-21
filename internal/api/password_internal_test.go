@@ -42,7 +42,7 @@ func (c *stepClock) advance(d time.Duration) {
 // tries spread wider than the window never do; a right try clears the count.
 func TestFailureLimiter(t *testing.T) {
 	clk := &stepClock{t: time.Date(2026, 11, 20, 12, 0, 0, 0, time.UTC)}
-	l := newFailureLimiter(clk.now)
+	l := newFailureLimiter(clk.now, passwordFailPolicy)
 
 	for i := 0; i < 4; i++ {
 		l.fail("a")
@@ -76,12 +76,12 @@ func TestFailureLimiter(t *testing.T) {
 // §3.4 — the wrong-password line is logged at most once a minute per account.
 func TestFailureLimiter_LogsOnceAMinute(t *testing.T) {
 	clk := &stepClock{t: time.Date(2026, 11, 20, 12, 0, 0, 0, time.UTC)}
-	l := newFailureLimiter(clk.now)
+	l := newFailureLimiter(clk.now, passwordFailPolicy)
 	assert.True(t, l.fail("a"))
 	clk.advance(30 * time.Second)
 	assert.False(t, l.fail("a"))
 	assert.True(t, l.fail("b"), "per account")
 	clk.advance(30 * time.Second)
 	assert.True(t, l.fail("a"))
-	assert.NotNil(t, newFailureLimiter(nil).now, "nil clock means time.Now")
+	assert.NotNil(t, newFailureLimiter(nil, passwordFailPolicy).now, "nil clock means time.Now")
 }

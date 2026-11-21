@@ -29,8 +29,15 @@ type Deps struct {
 	OIDC         oidc.Config
 	// MaxAccounts is HOMEPAD_MAX_ACCOUNTS: 0 is no limit.
 	MaxAccounts int
-	// InviteLimit is the public invite routes' rate limit; zero is the default.
+	// InviteLimit is the per-client limit on the invite and reset-link
+	// routes; zero is the default. Limits.Invite and Limits.Reset win.
 	InviteLimit RateLimit
+	// Limits are the sign-in limits (SPEC-signin-hardening §2.1); a zero
+	// field is its default.
+	Limits Limits
+	// TrustedProxies is HOMEPAD_TRUSTED_PROXIES, parsed; nil trusts no
+	// proxy, so the client is always the TCP peer (§2.2).
+	TrustedProxies *TrustedProxies
 
 	// Status widgets (SPEC-status-widgets). All optional: New builds a
 	// default for any left nil, so a server always has a working set.
@@ -54,9 +61,17 @@ type server struct {
 	pending      *oidc.Pending
 	// maxAccounts is HOMEPAD_MAX_ACCOUNTS (0 = no limit).
 	maxAccounts int
-	// inviteBucket is the one rate limit the public invite routes share
-	// (SPEC-household-basics §3.4). Per server, so per process.
-	inviteBucket *tokenBucket
+	// The sign-in limits (SPEC-signin-hardening §2.1), all per process: a
+	// bucket per client for each public sign-in route, the process ceiling
+	// the bcrypt and token routes share, and the per-email login lock.
+	trusted       *TrustedProxies
+	loginLimit    *keyedLimiter
+	registerLimit *keyedLimiter
+	inviteLimit   *keyedLimiter
+	resetLimit    *keyedLimiter
+	oidcLimit     *keyedLimiter
+	ceiling       *tokenBucket
+	loginFails    *failureLimiter
 	// passwordFails counts wrong current passwords on POST /api/me/password,
 	// per account (SPEC-password-reset-link §3.3). Per process.
 	passwordFails *failureLimiter
@@ -91,14 +106,29 @@ func newServer(d Deps) *server {
 		cookieSecure: ParseCookieSecure(os.Getenv("COOKIE_SECURE")),
 		oidc:         d.OIDC,
 		maxAccounts:  d.MaxAccounts,
-		inviteBucket: newTokenBucket(d.InviteLimit, time.Now),
+		trusted:      d.TrustedProxies,
 		widgets:      d.Widgets,
 		weather:      d.Weather,
 		sealer:       d.Sealer,
 		widgetKinds:  d.WidgetKinds,
 		outbound:     d.Outbound,
 	}
-	s.passwordFails = newFailureLimiter(time.Now)
+	s.passwordFails = newFailureLimiter(time.Now, passwordFailPolicy)
+	limits := d.Limits
+	if limits.Invite == (RateLimit{}) {
+		limits.Invite = d.InviteLimit
+	}
+	if limits.Reset == (RateLimit{}) {
+		limits.Reset = d.InviteLimit
+	}
+	limits = limits.withDefaults()
+	s.loginLimit = newKeyedLimiter("login", limits.Login, time.Now)
+	s.registerLimit = newKeyedLimiter("register", limits.Register, time.Now)
+	s.inviteLimit = newKeyedLimiter("invites", limits.Invite, time.Now)
+	s.resetLimit = newKeyedLimiter("resets", limits.Reset, time.Now)
+	s.oidcLimit = newKeyedLimiter("oidc login", limits.OIDCLogin, time.Now)
+	s.ceiling = newTokenBucket(limits.Ceiling, time.Now)
+	s.loginFails = newFailureLimiter(time.Now, loginFailPolicy)
 	// Defaults for anything left unwired, so every server has a working
 	// widget set (the manager's loop only runs where main starts it).
 	if s.outbound == nil {
@@ -185,8 +215,11 @@ func (rt *router) handle(pattern string, class routeClass, h http.HandlerFunc) {
 func (s *server) routes(d Deps) (http.Handler, []registeredRoute) {
 	rt := &router{s: s, mux: http.NewServeMux(), stub: d.Store == nil || d.Sessions == nil}
 
-	rt.handle("POST /api/register", classPublic, s.handleRegister)
-	rt.handle("POST /api/login", classPublic, s.handleLogin)
+	// SPEC-signin-hardening §2.1 — each public sign-in route has a limit per
+	// client and shares the process ceiling; login also locks an email after
+	// 10 failures (handleLogin).
+	rt.handle("POST /api/register", classPublic, s.limited("POST /api/register", s.registerLimit, s.handleRegister))
+	rt.handle("POST /api/login", classPublic, s.limited("POST /api/login", s.loginLimit, s.handleLogin))
 	rt.handle("POST /api/logout", classCatalogFree, s.handleLogout)
 	rt.handle("GET /api/me", classCatalogFree, s.handleMe)
 	rt.handle("PATCH /api/me", classCatalogFree, s.handlePatchMe)
@@ -246,20 +279,21 @@ func (s *server) routes(d Deps) (http.Handler, []registeredRoute) {
 	rt.handle(removeAdultRoute, classAdminOnly, s.handleRemoveAdult)
 
 	// SPEC-household-basics §7 — invites. Making, listing and revoking are
-	// admin-only; the link's two routes are public and share one rate limit.
+	// admin-only; the link's two routes are public and share one per-client
+	// limit and the process ceiling (SPEC-signin-hardening §2.1).
 	rt.handle("POST /api/admin/invites", classAdminOnly, s.handleCreateInvite)
 	rt.handle("GET /api/admin/invites", classAdminOnly, s.handleListInvites)
 	rt.handle("DELETE /api/admin/invites/{id}", classAdminOnly, s.handleRevokeInvite)
-	rt.handle("POST /api/invites/lookup", classPublic, rateLimited(s.inviteBucket, s.handleLookupInvite))
-	rt.handle("POST /api/invites/accept", classPublic, rateLimited(s.inviteBucket, s.handleAcceptInvite))
+	rt.handle("POST /api/invites/lookup", classPublic, s.limited("POST /api/invites/lookup", s.inviteLimit, s.handleLookupInvite))
+	rt.handle("POST /api/invites/accept", classPublic, s.limited("POST /api/invites/accept", s.inviteLimit, s.handleAcceptInvite))
 
 	// SPEC-password-reset-link §7 — reset links and changing your own
 	// password. Making a link is admin-only; the link's two routes are public
-	// and share the invite routes' rate limit until SPEC-signin-hardening
-	// gives them their own.
+	// and share their own per-client limit and the process ceiling
+	// (SPEC-signin-hardening §2.1).
 	rt.handle("POST /api/admin/accounts/{id}/reset-link", classAdminOnly, s.handleCreateResetLink)
-	rt.handle("POST /api/password-resets/lookup", classPublic, rateLimited(s.inviteBucket, s.handleLookupReset))
-	rt.handle("POST /api/password-resets/accept", classPublic, rateLimited(s.inviteBucket, s.handleAcceptReset))
+	rt.handle("POST /api/password-resets/lookup", classPublic, s.limited("POST /api/password-resets/lookup", s.resetLimit, s.handleLookupReset))
+	rt.handle("POST /api/password-resets/accept", classPublic, s.limited("POST /api/password-resets/accept", s.resetLimit, s.handleAcceptReset))
 	rt.handle("POST /api/me/password", classKidForbidden, s.handleChangePassword)
 
 	// SPEC-backup-import §8 — backup, restore and Homepage import.
@@ -287,7 +321,7 @@ func (s *server) routes(d Deps) (http.Handler, []registeredRoute) {
 	if d.OIDC.Enabled {
 		s.provider = oidc.NewProvider(d.OIDC)
 		s.pending = oidc.NewPending(oidcPendingTTL)
-		rt.handle("GET /api/auth/oidc/login", classPublic, s.handleOIDCLogin)
+		rt.handle("GET /api/auth/oidc/login", classPublic, s.oidcStartLimited(s.oidcLimit, s.handleOIDCLogin))
 		rt.handle("GET /api/auth/oidc/callback", classPublic, s.handleOIDCCallback)
 	}
 

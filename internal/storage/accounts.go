@@ -151,3 +151,26 @@ func (s *Store) CreateOIDCUser(ctx context.Context, email, passwordHash, role st
 	})
 	return u, err
 }
+
+// CreateOIDCMember is CreateOIDCUser for a member let in by OIDC_MEMBER_GROUP
+// under invite_only (SPEC-signin-hardening §2.5). It refuses with
+// ErrRegistrationClosed while the household has no adult, under the same
+// lock, so an empty install's first account is never a member.
+func (s *Store) CreateOIDCMember(ctx context.Context, email, passwordHash string, limit int) (User, error) {
+	var u User
+	err := s.withAccountLock(ctx, func(tx pgx.Tx) error {
+		adults, err := countAdults(ctx, tx)
+		if err != nil {
+			return err
+		}
+		if adults == 0 {
+			return ErrRegistrationClosed
+		}
+		if err := checkLimit(ctx, tx, limit); err != nil {
+			return err
+		}
+		u, err = insertUser(ctx, tx, email, passwordHash, "user", "")
+		return err
+	})
+	return u, err
+}
