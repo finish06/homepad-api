@@ -56,8 +56,15 @@ stubs remain. `go test ./...` runs 26 tests green; `go vet ./...` clean.
   apps only) and its theme. `internal/api/routes_test.go` classifies every
   route and probes each one with a kid session; a new route that is not
   classified there fails the build.
-- **Catalog** — shared service list; order-aware `GET /api/services` merges each
-  user's saved layout. Admin-only create / edit / delete (non-admin → 403).
+- **Catalog** — one service list for the household; order-aware
+  `GET /api/services` merges each user's saved layout. Admin-only create /
+  edit / delete (non-admin → 403). No account owns the catalog (migration
+  `0021`, 18.0.0), so deleting an account never deletes an app. Slugs and
+  section names are unique across the catalog.
+- **Migrations** — each `migrations/*.up.sql` runs once, in order, and is
+  recorded in `schema_migrations`, all in one transaction under an advisory
+  lock. A failed file records nothing, so the next boot tries again. `0021`
+  is one way: take a database dump before upgrading to 18.0.0.
 - **Per-user state** — favorites and personal sort order, persisted in Postgres.
 - **Status poller** — polls Gatus on an interval (≤30s, status `as_of` exposed)
   and serves status per service; Gatus unreachable → all `UNKNOWN`, never a 5xx.
@@ -102,7 +109,7 @@ POST   /api/admin/kids/{id}/sign-in-here        ends the admin's session, sets t
 Backup, restore and Homepage import (all admin-only; SPEC-backup-import):
 
 ```
-GET    /api/admin/export?people=true|false            the backup file (JSON, schema v1)
+GET    /api/admin/export?people=true|false            the backup file (JSON, schema v2)
 POST   /api/admin/restore/preview?mode=merge|replace  body: the backup → Plan
 POST   /api/admin/restore?mode=…&plan={planHash}      same body → Result, or 409 + new Plan
 POST   /api/admin/import/homepage/preview             {services, bookmarks?, settings?} → Plan
@@ -111,10 +118,13 @@ POST   /api/admin/import/homepage?plan={planHash}     same body → Result, or 4
 
 A preview changes nothing. An apply re-plans inside one transaction holding an
 advisory lock, refuses with 409 when the plan changed since the preview, and
-writes everything or nothing. Every write lands in the shared catalog owner's
-rows, whichever admin runs it. A backup holds no ids, password hashes,
+writes everything or nothing. Every write lands in the household's catalog,
+whichever admin runs it. A backup holds no ids, password hashes,
 sessions, OIDC or env config, or the Gatus URL; its JSON Schema is
-[`docs/schema/homepad-backup-v1.json`](docs/schema/homepad-backup-v1.json).
+[`docs/schema/homepad-backup-v2.json`](docs/schema/homepad-backup-v2.json).
+18.0.0 writes `schemaVersion` 2, with the same keys as version 1
+([`homepad-backup-v1.json`](docs/schema/homepad-backup-v1.json)); it still
+restores version 1 files. Homepad 17.x refuses a version 2 file.
 Homepage `widget`, `widgets` and `providers` values are dropped while parsing
 and never stored, logged or returned. `url` and `icon` written by these routes
 are always `http(s)` or empty. Limits: a backup up to 16 MB, each Homepage file

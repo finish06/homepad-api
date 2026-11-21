@@ -38,11 +38,13 @@ func seedStoreAdmin(t *testing.T, store *storage.Store, ctx context.Context) str
 	return u.ID
 }
 
-func seedStoreService(t *testing.T, store *storage.Store, ctx context.Context, ownerID string) string {
+// seedStoreService adds an app to the catalog and returns its id. The slug is
+// unique across runs: the catalog's slugs are unique across the table.
+func seedStoreService(t *testing.T, store *storage.Store, ctx context.Context) string {
 	t.Helper()
 	catSeq++
-	sv, err := store.CreateService(ctx, ownerID, storage.Service{
-		Slug: fmt.Sprintf("svc-%d", catSeq), Name: fmt.Sprintf("Svc %d", catSeq), URL: "https://example.com",
+	sv, err := store.CreateService(ctx, storage.Service{
+		Slug: fmt.Sprintf("svc-%s-%d", runID, catSeq), Name: fmt.Sprintf("Svc %d", catSeq), URL: "https://example.com",
 	})
 	require.NoError(t, err)
 	return sv.ID
@@ -72,9 +74,8 @@ func TestVisibleServiceIDs_AdultsSeeEverything(t *testing.T) {
 // mistake that would show a kid with no apps the entire catalog.
 func TestVisibleServiceIDs_KidSeesOnlyAllowList(t *testing.T) {
 	store, ctx := openStore(t)
-	admin := seedStoreAdmin(t, store, ctx)
-	a := seedStoreService(t, store, ctx, admin)
-	b := seedStoreService(t, store, ctx, admin)
+	a := seedStoreService(t, store, ctx)
+	b := seedStoreService(t, store, ctx)
 
 	kid, err := store.CreateKid(ctx, uniqueKidName(t), "blue")
 	require.NoError(t, err)
@@ -223,18 +224,13 @@ func TestCountUsers_IgnoresKids(t *testing.T) {
 func TestSetKidServices_ReplaceAndValidate(t *testing.T) {
 	store, ctx := openStore(t)
 	conn := rawConn(t, ctx)
-	// Pin the shared-catalog owner for this test: it is the FIRST admin, which
-	// in a shared DB may be some other test's admin. Seed services under it.
-	owner, err := store.SharedCatalogOwnerID(ctx)
-	if errors.Is(err, storage.ErrNotFound) {
-		owner = seedStoreAdmin(t, store, ctx)
-	} else {
-		require.NoError(t, err)
-	}
-	a := seedStoreService(t, store, ctx, owner)
-	b := seedStoreService(t, store, ctx, owner)
+	// SPEC-household-catalog-owner AC-015 — any catalog app is accepted, no
+	// matter which admin added it; an id that names no app is refused.
+	a := seedStoreService(t, store, ctx)
+	b := seedStoreService(t, store, ctx)
 	plain := seedStoreUser(t, store, ctx)
-	notShared := seedStoreService(t, store, ctx, plain)
+	gone := seedStoreService(t, store, ctx)
+	require.NoError(t, store.DeleteService(ctx, gone))
 
 	kid, err := store.CreateKid(ctx, uniqueKidName(t), "blue")
 	require.NoError(t, err)
@@ -252,7 +248,7 @@ func TestSetKidServices_ReplaceAndValidate(t *testing.T) {
 	for _, bad := range [][]string{
 		{a, "00000000-0000-0000-0000-000000000000"},
 		{a, "not-a-uuid"},
-		{a, notShared},
+		{a, gone},
 	} {
 		err := store.SetKidServices(ctx, kid.ID, bad)
 		assert.ErrorIs(t, err, storage.ErrUnknownService, "ids %v", bad)
@@ -276,14 +272,8 @@ func TestSetKidServices_ReplaceAndValidate(t *testing.T) {
 // Deleting a service drops it from every allow-list (FK cascade, spec §6).
 func TestDeleteService_DropsFromAllowLists(t *testing.T) {
 	store, ctx := openStore(t)
-	owner, err := store.SharedCatalogOwnerID(ctx)
-	if errors.Is(err, storage.ErrNotFound) {
-		owner = seedStoreAdmin(t, store, ctx)
-	} else {
-		require.NoError(t, err)
-	}
-	a := seedStoreService(t, store, ctx, owner)
-	b := seedStoreService(t, store, ctx, owner)
+	a := seedStoreService(t, store, ctx)
+	b := seedStoreService(t, store, ctx)
 	k1, err := store.CreateKid(ctx, uniqueKidName(t), "blue")
 	require.NoError(t, err)
 	k2, err := store.CreateKid(ctx, uniqueKidName(t), "blue")
@@ -291,7 +281,7 @@ func TestDeleteService_DropsFromAllowLists(t *testing.T) {
 	require.NoError(t, store.SetKidServices(ctx, k1.ID, []string{a, b}))
 	require.NoError(t, store.SetKidServices(ctx, k2.ID, []string{a}))
 
-	require.NoError(t, store.DeleteService(ctx, a, owner))
+	require.NoError(t, store.DeleteService(ctx, a))
 
 	ids, err := store.KidServiceIDs(ctx, k1.ID)
 	require.NoError(t, err)
@@ -307,14 +297,9 @@ func TestDeleteService_DropsFromAllowLists(t *testing.T) {
 func TestDeleteKid_CascadesAndRefusesAdults(t *testing.T) {
 	store, ctx := openStore(t)
 	conn := rawConn(t, ctx)
-	owner, err := store.SharedCatalogOwnerID(ctx)
-	if errors.Is(err, storage.ErrNotFound) {
-		owner = seedStoreAdmin(t, store, ctx)
-	} else {
-		require.NoError(t, err)
-	}
-	svc := seedStoreService(t, store, ctx, owner)
-	cat, err := store.CreateCategory(ctx, owner, uniqueName(t))
+	adult := seedStoreAdmin(t, store, ctx)
+	svc := seedStoreService(t, store, ctx)
+	cat, err := store.CreateCategory(ctx, uniqueName(t))
 	require.NoError(t, err)
 
 	kid, err := store.CreateKid(ctx, uniqueKidName(t), "blue")
@@ -336,8 +321,8 @@ func TestDeleteKid_CascadesAndRefusesAdults(t *testing.T) {
 	}
 
 	// An adult id is not a kid: refused, nothing deleted.
-	assert.ErrorIs(t, store.DeleteKid(ctx, owner), storage.ErrNotFound)
-	_, err = store.UserByID(ctx, owner)
+	assert.ErrorIs(t, store.DeleteKid(ctx, adult), storage.ErrNotFound)
+	_, err = store.UserByID(ctx, adult)
 	require.NoError(t, err, "DeleteKid must never delete an adult")
 	assert.ErrorIs(t, store.DeleteKid(ctx, "not-a-uuid"), storage.ErrNotFound)
 

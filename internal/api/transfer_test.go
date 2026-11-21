@@ -257,7 +257,8 @@ func TestTransfer_ExportFromAPopulatedDB(t *testing.T) {
 	assert.Equal(t, fmt.Sprintf(`attachment; filename="homepad-backup-%s.json"`, time.Now().UTC().Format("2006-01-02")),
 		resp.Header.Get("Content-Disposition"))
 
-	schema, err := os.ReadFile(filepath.Join("..", "..", "docs", "schema", "homepad-backup-v1.json"))
+	// SPEC-household-catalog-owner AC-012 — 18.0.0 writes schema version 2.
+	schema, err := os.ReadFile(filepath.Join("..", "..", "docs", "schema", "homepad-backup-v2.json"))
 	require.NoError(t, err)
 	assert.Empty(t, schemacheck.Validate(schema, b))
 
@@ -384,12 +385,13 @@ func TestTransfer_RestoreOntoAFreshInstall(t *testing.T) {
 	assert.True(t, res.Applied)
 	assert.Empty(t, res.PlanHash)
 
-	// Every write went to the shared catalog owner (AC-025).
-	assert.Equal(t, 5, countRows(t, env, `SELECT count(*) FROM services WHERE user_id = $1 AND slug = ANY($2)`,
-		env.AdminID, []string{"grafana", "jellyfin", "router", "sonarr", "unifi"}))
-	assert.Equal(t, 3, countRows(t, env, `SELECT count(*) FROM categories WHERE user_id = $1 AND name = ANY($2)`,
-		env.AdminID, []string{"Media", "Network", "Tools"}))
-	assert.Equal(t, 0, countRows(t, env, `SELECT count(*) FROM services s JOIN users u ON u.id = s.user_id WHERE u.email = 'admin2@homepad.test'`))
+	// Every write went to the household's catalog (AC-025,
+	// SPEC-household-catalog-owner): the apps and sections are the catalog.
+	assert.Equal(t, 5, countRows(t, env, `SELECT count(*) FROM services WHERE slug = ANY($1)`,
+		[]string{"grafana", "jellyfin", "router", "sonarr", "unifi"}))
+	assert.Equal(t, 5, countRows(t, env, `SELECT count(*) FROM services`))
+	assert.Equal(t, 3, countRows(t, env, `SELECT count(*) FROM categories WHERE name = ANY($1)`,
+		[]string{"Media", "Network", "Tools"}))
 	// A plain user sees the restored apps.
 	var slugs []string
 	for _, sv := range listServicesFull(t, env.URL, "non-admin-session") {
@@ -460,8 +462,10 @@ func TestTransfer_RestoreReplace(t *testing.T) {
 	code, b := applyRestore(t, env.URL, "admin-session", "replace", p.PlanHash, file)
 	require.Equal(t, http.StatusOK, code, "%s", b)
 	assert.Equal(t, 0, countRows(t, env, `SELECT count(*) FROM services WHERE id = $1`, old))
-	assert.Equal(t, 5, countRows(t, env, `SELECT count(*) FROM services WHERE user_id = $1`, env.AdminID))
-	assert.Equal(t, 2, countRows(t, env, `SELECT count(*) FROM services WHERE user_id = $1`, env.UserID), "rows outside the catalog are not the catalog")
+	// SPEC-household-catalog-owner AC-013 — every app, section and offer is
+	// the file's: nothing else is left.
+	assert.Equal(t, 5, countRows(t, env, `SELECT count(*) FROM services`))
+	assert.Equal(t, 3, countRows(t, env, `SELECT count(*) FROM categories`))
 	assert.Equal(t, 2, countRows(t, env, `SELECT count(*) FROM library_apps`))
 
 	code, b = postRaw(t, env.URL+"/api/admin/restore/preview?mode=wipe", "admin-session", file)
@@ -510,7 +514,7 @@ func emptyCatalog(t *testing.T, env *testsupport.Env) {
 		r.Body.Close()
 		require.Equal(t, http.StatusNoContent, r.StatusCode)
 	}
-	require.Equal(t, 0, countRows(t, env, `SELECT count(*) FROM services WHERE user_id = $1`, env.AdminID))
+	require.Equal(t, 0, countRows(t, env, `SELECT count(*) FROM services`))
 }
 
 func firstSlugID(t *testing.T, env *testsupport.Env, slug string) string {
@@ -577,7 +581,7 @@ func TestTransfer_ConcurrentAppliesAreSerialized(t *testing.T) {
 	}
 	assert.Equal(t, 1, ok, "%v", codes)
 	assert.Equal(t, 3, conflict, "%v", codes)
-	assert.Equal(t, 1, countRows(t, env, `SELECT count(*) FROM services WHERE user_id = $1 AND name = 'Sonarr'`, env.AdminID))
+	assert.Equal(t, 1, countRows(t, env, `SELECT count(*) FROM services WHERE name = 'Sonarr'`))
 }
 
 // AC-016, AC-026, AC-028 — refusals and their status codes.
@@ -698,7 +702,7 @@ func TestTransfer_HomepageImport(t *testing.T) {
 	for _, s := range []string{"sonarr", "plex", "router", "proxmox", "github", "docs", "reddit"} {
 		assert.True(t, bySlug[s], "%s imported and visible to a user", s)
 	}
-	assert.Equal(t, 0, countRows(t, env, `SELECT count(*) FROM services WHERE gatus_key IS NOT NULL AND user_id = $1 AND slug IN ('sonarr','router')`, env.AdminID))
+	assert.Equal(t, 0, countRows(t, env, `SELECT count(*) FROM services WHERE gatus_key IS NOT NULL AND slug IN ('sonarr','router')`))
 	// AC-029 — the second admin's order holds the imports in Homepage order.
 	secondID := ""
 	for _, a := range listAccountsRaw(t, env) {
@@ -708,7 +712,7 @@ func TestTransfer_HomepageImport(t *testing.T) {
 	}
 	require.NotEmpty(t, secondID)
 	assert.Equal(t, 9, countRows(t, env, `SELECT count(*) FROM user_layout WHERE user_id = $1`, secondID), "2 existing + 7 imported")
-	assert.Equal(t, 0, countRows(t, env, `SELECT count(*) FROM user_layout WHERE user_id = $1`, env.AdminID), "the owner's order is untouched")
+	assert.Equal(t, 0, countRows(t, env, `SELECT count(*) FROM user_layout WHERE user_id = $1`, env.AdminID), "the first admin's order is untouched")
 
 	// TC-009 — Gatus now knows the keys.
 	r := doJSON(t, http.MethodPost, env.URL+"/api/status/refresh", second, nil)
@@ -720,7 +724,7 @@ func TestTransfer_HomepageImport(t *testing.T) {
 	code, b = applyImport(t, env.URL, second, p2.PlanHash, imp)
 	require.Equal(t, http.StatusOK, code, "%s", b)
 	responses = append(responses, string(b))
-	assert.Equal(t, 2, countRows(t, env, `SELECT count(*) FROM services WHERE user_id = $1 AND gatus_key IN ('media_sonarr','infra_router')`, env.AdminID))
+	assert.Equal(t, 2, countRows(t, env, `SELECT count(*) FROM services WHERE gatus_key IN ('media_sonarr','infra_router')`))
 	_, sb := getBody(t, env.URL+"/api/services", "non-admin-session")
 	responses = append(responses, string(sb))
 	assert.Contains(t, string(sb), `"status":"UP"`)

@@ -2,10 +2,7 @@ package api
 
 import (
 	"encoding/json"
-	"errors"
 	"net/http"
-
-	"gitea.kube.calebdunn.tech/code/homepad-api/internal/storage"
 )
 
 // handleGetCollapsedCategories returns the current user's collapsed category-id
@@ -29,16 +26,7 @@ func (s *server) handleGetCollapsedCategories(w http.ResponseWriter, r *http.Req
 		return
 	}
 	if vis != nil {
-		owner, err := s.store.SharedCatalogOwnerID(r.Context())
-		if errors.Is(err, storage.ErrNotFound) {
-			writeJSON(w, http.StatusOK, map[string]any{"collapsed": []string{}})
-			return
-		}
-		if err != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
-		}
-		visibleCats, ok := s.visibleCategoryIDs(w, r, owner, u)
+		visibleCats, ok := s.visibleCategoryIDs(w, r, u)
 		if !ok {
 			return
 		}

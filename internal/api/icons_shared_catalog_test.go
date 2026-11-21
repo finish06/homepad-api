@@ -14,12 +14,13 @@ import (
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/testsupport"
 )
 
-// #84 — an uploaded icon lives on a shared-catalog service, which is owned by
-// the first admin. Every account reads that catalog, so every account must be
-// able to read its icons: the owner, a plain user, and a second admin alike.
+// #84 — an uploaded icon lives on a catalog service. Every account reads the
+// catalog, so every account must be able to read its icons: the first admin,
+// a plain user, and a second admin alike. Since SPEC-household-catalog-owner
+// the catalog has no owner at all; these guard against a regression.
 
-// seedSecondAdmin creates an admin who is NOT the shared-catalog owner (the
-// owner is the first admin) and signs them in. It returns the session token.
+// seedSecondAdmin creates an admin who signed up after the first one and signs
+// them in. It returns the session token.
 func seedSecondAdmin(t *testing.T, env *testsupport.Env) string {
 	t.Helper()
 	ctx := context.Background()
@@ -29,11 +30,7 @@ func seedSecondAdmin(t *testing.T, env *testsupport.Env) string {
 	require.NoError(t, err)
 	const token = "second-admin-session"
 	require.NoError(t, env.Sessions.Bind(ctx, token, u.ID, session.AdultLifetime))
-
-	owner, err := env.Store.SharedCatalogOwnerID(ctx)
-	require.NoError(t, err)
-	require.Equal(t, env.AdminID, owner, "the first admin stays the catalog owner")
-	require.NotEqual(t, owner, u.ID, "the second admin must not be the owner")
+	require.NotEqual(t, env.AdminID, u.ID)
 	return token
 }
 

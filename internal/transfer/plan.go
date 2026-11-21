@@ -127,7 +127,6 @@ type Ignored struct {
 // over what the admin saw, and apply re-plans from the live state anyway.
 type ops struct {
 	replace bool
-	owner   string
 	caller  string
 	// sectionIDs and appIDs name the rows that exist before the apply (empty
 	// after a Replace's delete); Apply adds the ones it creates.
@@ -186,7 +185,7 @@ type personOp struct {
 type appRef struct{ id, slug string }
 
 func newPlan(mode string, st *storage.TransferState) (*Plan, *ops) {
-	o := &ops{owner: st.OwnerID, caller: st.CallerID, sectionIDs: map[string]string{}, appIDs: map[string]string{}}
+	o := &ops{caller: st.CallerID, sectionIDs: map[string]string{}, appIDs: map[string]string{}}
 	return &Plan{
 		Mode:          mode,
 		Items:         []Item{},

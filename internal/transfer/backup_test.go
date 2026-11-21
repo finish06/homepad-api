@@ -38,7 +38,6 @@ func populatedState() *storage.TransferState {
 	jelly, router, sonarr := "0b7f6c0e-2222-4c1e-9d1a-000000000001", "0b7f6c0e-2222-4c1e-9d1a-000000000002", "0b7f6c0e-2222-4c1e-9d1a-000000000003"
 	degraded := 1500
 	return &storage.TransferState{
-		OwnerID:  "0b7f6c0e-0000-4c1e-9d1a-00000000000a",
 		CallerID: "0b7f6c0e-0000-4c1e-9d1a-00000000000a",
 		Sections: []storage.TransferSection{
 			{ID: media, Name: "Media", SortIndex: 0, GridWidth: 6},
@@ -68,29 +67,38 @@ func populatedState() *storage.TransferState {
 	}
 }
 
+// schemaBytes is the JSON Schema of the version this server writes.
 func schemaBytes(t *testing.T) []byte {
 	t.Helper()
-	b, err := os.ReadFile(filepath.Join("..", "..", "docs", "schema", "homepad-backup-v1.json"))
+	return schemaVersionBytes(t, transfer.SchemaVersion)
+}
+
+func schemaVersionBytes(t *testing.T, v int) []byte {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join("..", "..", "docs", "schema", fmt.Sprintf("homepad-backup-v%d.json", v)))
 	require.NoError(t, err)
 	return b
 }
 
-// AC-001 — the file matches docs/schema/homepad-backup-v1.json, with and
-// without people. The fixture matches it too.
+// AC-001 — the file matches docs/schema/homepad-backup-v2.json, with and
+// without people. Every fixture matches the schema of its own version.
 func TestBackup_MatchesJSONSchema(t *testing.T) {
 	schema := schemaBytes(t)
 	for _, people := range []bool{true, false} {
-		out := transfer.Encode(transfer.BuildFile(populatedState(), people, "17.1.0", exportTime))
+		out := transfer.Encode(transfer.BuildFile(populatedState(), people, "18.0.0", exportTime))
 		require.NotEmpty(t, out)
 		assert.Empty(t, schemacheck.Validate(schema, out), "people=%v", people)
 	}
-	assert.Empty(t, schemacheck.Validate(schema, readFixture(t, "backups/v1.json")))
+	for v := 1; v <= transfer.SchemaVersion; v++ {
+		assert.Empty(t, schemacheck.Validate(schemaVersionBytes(t, v), readFixture(t, fmt.Sprintf("backups/v%d.json", v))), "v%d", v)
+	}
+	assert.NotEmpty(t, schemacheck.Validate(schema, readFixture(t, "backups/v1.json")), "a v1 file is not a v2 file")
 }
 
 // The checker can fail: a file with an extra key, a wrong width and a missing
 // key is refused (negative control for AC-001).
 func TestBackup_SchemaCheckerRejectsBadFiles(t *testing.T) {
-	bad := `{"format":"homepad-backup","schemaVersion":1,"exportedAt":"2026-11-07T18:04:11Z","homepadVersion":"x",
+	bad := `{"format":"homepad-backup","schemaVersion":2,"exportedAt":"2026-11-07T18:04:11Z","homepadVersion":"x",
 	  "includesPeople":false,"settings":{"showUptimeDisplay":true,"statusDegradedMs":null},
 	  "sections":[{"name":"A","gridWidth":5}],"apps":[],"library":[],"passwordHash":"x"}`
 	errs := schemacheck.Validate(schemaBytes(t), []byte(bad))
@@ -103,7 +111,7 @@ func TestBackup_HoldsTheWholeCatalog(t *testing.T) {
 	f := transfer.BuildFile(populatedState(), true, "17.1.0", exportTime)
 	require.NotNil(t, f)
 	assert.Equal(t, "homepad-backup", f.Format)
-	assert.Equal(t, 1, f.SchemaVersion)
+	assert.Equal(t, 2, f.SchemaVersion, "18.0.0 writes schema version 2 (SPEC-household-catalog-owner AC-012)")
 	assert.Equal(t, "2026-11-07T18:04:11Z", f.ExportedAt)
 	assert.Equal(t, "17.1.0", f.HomepadVersion)
 	assert.Equal(t, []transfer.Section{{Name: "Media", GridWidth: 6}, {Name: "Network", GridWidth: 3}}, f.Sections)
@@ -208,15 +216,15 @@ func TestBackup_Deterministic(t *testing.T) {
 // The fixture is in canonical form, so decoding and re-encoding it gives the
 // same bytes.
 func TestBackup_EncodeIsCanonical(t *testing.T) {
-	raw := readFixture(t, "backups/v1.json")
-	d := decodeFixture(t)
+	raw := readFixture(t, "backups/v2.json")
+	d := decodeFixtureVersion(t, 2)
 	assert.Equal(t, string(raw), string(transfer.Encode(d.File)))
 
 	f := transfer.BuildFile(populatedState(), false, "17.1.0", exportTime)
 	f.Apps[0].Description = "Movies & <TV>"
 	out := transfer.Encode(f)
 	assert.Contains(t, string(out), `"description": "Movies & <TV>"`)
-	assert.True(t, bytes.HasPrefix(out, []byte("{\n  \"format\": \"homepad-backup\",\n  \"schemaVersion\": 1,\n")))
+	assert.True(t, bytes.HasPrefix(out, []byte("{\n  \"format\": \"homepad-backup\",\n  \"schemaVersion\": 2,\n")))
 }
 
 // AC-016 — format and version checks.

@@ -182,7 +182,7 @@ func (s *Store) DeleteKid(ctx context.Context, id string) error {
 }
 
 // Account is one row of the admin Accounts list (spec §7). AppCount is the
-// size of a kid's allow-list within the shared catalog (0 for adults).
+// size of a kid's allow-list (0 for adults).
 type Account struct {
 	User
 	AppCount int
@@ -193,9 +193,7 @@ type Account struct {
 func (s *Store) ListAccounts(ctx context.Context) ([]Account, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT `+userColumns+`,
-		        (SELECT count(*) FROM kid_allowed_services k
-		           JOIN services sv ON sv.id = k.service_id
-		          WHERE k.user_id = users.id AND sv.user_id = `+sharedOwnerSQL+`)
+		        (SELECT count(*) FROM kid_allowed_services k WHERE k.user_id = users.id)
 		   FROM users
 		  ORDER BY CASE role WHEN 'admin' THEN 0 WHEN 'user' THEN 1 ELSE 2 END, created_at, id`)
 	if err != nil {
@@ -214,18 +212,15 @@ func (s *Store) ListAccounts(ctx context.Context) ([]Account, error) {
 	return out, rows.Err()
 }
 
-// sharedOwnerSQL is SharedCatalogOwnerID as a subquery.
-const sharedOwnerSQL = `(SELECT id FROM users WHERE role = 'admin' ORDER BY created_at, id LIMIT 1)`
-
-// KidServiceIDs returns the kid's allow-list, restricted to services in the
-// shared catalog (what the kid can actually see), ordered by service name.
+// KidServiceIDs returns the kid's allow-list, ordered by service name. Every
+// row names a catalog app: the foreign key removes a deleted app from every
+// list.
 func (s *Store) KidServiceIDs(ctx context.Context, kidID string) ([]string, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT k.service_id
 		   FROM kid_allowed_services k
 		   JOIN services sv ON sv.id = k.service_id
 		  WHERE k.user_id = $1
-		    AND sv.user_id = `+sharedOwnerSQL+`
 		  ORDER BY sv.name, sv.id`, kidID)
 	if isInvalidText(err) {
 		return []string{}, nil
@@ -246,9 +241,10 @@ func (s *Store) KidServiceIDs(ctx context.Context, kidID string) ([]string, erro
 }
 
 // SetKidServices replaces the kid's allow-list with serviceIDs (whole-set
-// replace, like SetLayout). Every id must name a service in the shared catalog,
-// else ErrUnknownService and nothing changes. Duplicates collapse. ErrNotFound
-// when kidID names no kid, so an adult can never be given an allow-list.
+// replace, like SetLayout). Every id must name a catalog app, else
+// ErrUnknownService and nothing changes (SPEC-household-catalog-owner
+// AC-015). Duplicates collapse. ErrNotFound when kidID names no kid, so an
+// adult can never be given an allow-list.
 func (s *Store) SetKidServices(ctx context.Context, kidID string, serviceIDs []string) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -278,8 +274,7 @@ func (s *Store) SetKidServices(ctx context.Context, kidID string, serviceIDs []s
 	// the transaction on a cast error.
 	var known int
 	if err := tx.QueryRow(ctx,
-		`SELECT count(*) FROM services
-		  WHERE id::text = ANY($1::text[]) AND user_id = `+sharedOwnerSQL,
+		`SELECT count(*) FROM services WHERE id::text = ANY($1::text[])`,
 		uniq).Scan(&known); err != nil {
 		return err
 	}

@@ -46,13 +46,13 @@ func TestMigration0013_RemapsAndIsIdempotent(t *testing.T) {
 	want := map[int]int{1: 3, 2: 4, 3: 6, 4: 6, 5: 12, 6: 12, 7: 12, 8: 12}
 	for old := range want {
 		_, err := conn.Exec(ctx,
-			`INSERT INTO categories (user_id, name, sort_index, grid_width) VALUES ($1, $2, $3, $3)`,
-			userID, "w"+string(rune('0'+old)), old)
+			`INSERT INTO categories (name, sort_index, grid_width) VALUES ($1, $2, $2)`,
+			"w"+string(rune('0'+old)), old)
 		require.NoError(t, err)
 	}
 
 	// First run: remap.
-	require.NoError(t, store.Migrate(ctx))
+	rerunMigration(t, ctx, store, "0013_grid_width_12col.up.sql")
 	got := map[int]int{}
 	rows, err := conn.Query(ctx, `SELECT grid_width_legacy, grid_width FROM categories`)
 	require.NoError(t, err)
@@ -65,7 +65,7 @@ func TestMigration0013_RemapsAndIsIdempotent(t *testing.T) {
 	assert.Equal(t, want, got, "remap table from SPEC-app-grid §10.4 (width 4 → 6, Caleb 2026-09-13)")
 
 	// Second run: nothing moves — spans are not remapped as if they were tile counts.
-	require.NoError(t, store.Migrate(ctx))
+	rerunMigration(t, ctx, store, "0013_grid_width_12col.up.sql")
 	again := map[int]int{}
 	rows, err = conn.Query(ctx, `SELECT grid_width_legacy, grid_width FROM categories`)
 	require.NoError(t, err)
@@ -80,8 +80,8 @@ func TestMigration0013_RemapsAndIsIdempotent(t *testing.T) {
 	// New rows default to the half span and the CHECK rejects a tile count.
 	var def int
 	require.NoError(t, conn.QueryRow(ctx,
-		`INSERT INTO categories (user_id, name, sort_index) VALUES ($1, 'fresh', 99) RETURNING grid_width`, userID).Scan(&def))
+		`INSERT INTO categories (name, sort_index) VALUES ('fresh', 99) RETURNING grid_width`).Scan(&def))
 	assert.Equal(t, 6, def)
-	_, err = conn.Exec(ctx, `INSERT INTO categories (user_id, name, sort_index, grid_width) VALUES ($1, 'bad', 100, 5)`, userID)
+	_, err = conn.Exec(ctx, `INSERT INTO categories (name, sort_index, grid_width) VALUES ('bad', 100, 5)`)
 	assert.Error(t, err, "the span CHECK must reject 5")
 }

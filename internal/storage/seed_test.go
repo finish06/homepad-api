@@ -10,10 +10,6 @@ import (
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/storage"
 )
 
-// zeroUUID is a syntactically-valid UUID that owns no services, so ListLibrary's
-// per-user `added` subquery is always false — we only care about the offers.
-const zeroUUID = "00000000-0000-0000-0000-000000000000"
-
 func resetLibrary(t *testing.T, ctx context.Context, dsn string) {
 	t.Helper()
 	conn, err := pgx.Connect(ctx, dsn)
@@ -42,7 +38,7 @@ func TestSeedLibraryIfEmpty_SeedsFreshDB(t *testing.T) {
 	require.NoError(t, err)
 	require.Greater(t, n, 0, "a fresh DB must self-seed the App Library from the committed seed")
 
-	offers, err := store.ListLibrary(ctx, zeroUUID)
+	offers, err := store.ListLibrary(ctx)
 	require.NoError(t, err)
 	require.Equal(t, n, len(offers), "every seeded offer must be present in the library")
 
@@ -69,14 +65,14 @@ func TestSeedLibraryIfEmpty_NoopWhenPresent(t *testing.T) {
 	if _, err := store.SeedLibraryIfEmpty(ctx); err != nil {
 		t.Fatalf("first seed: %v", err)
 	}
-	before, err := store.ListLibrary(ctx, zeroUUID)
+	before, err := store.ListLibrary(ctx)
 	require.NoError(t, err)
 
 	n2, err := store.SeedLibraryIfEmpty(ctx)
 	require.NoError(t, err)
 	require.Equal(t, 0, n2, "second seed must insert nothing")
 
-	after, err := store.ListLibrary(ctx, zeroUUID)
+	after, err := store.ListLibrary(ctx)
 	require.NoError(t, err)
 	require.Equal(t, len(before), len(after), "re-seeding must not double the catalog")
 }

@@ -8,17 +8,18 @@ import (
 )
 
 // Writer is what Apply writes through: *storage.TransferTx in production, an
-// in-memory state in the pure tests. Every catalog write names the owner.
+// in-memory state in the pure tests. The catalog has no owner
+// (SPEC-household-catalog-owner), so no write names one.
 type Writer interface {
-	DeleteCatalog(ctx context.Context, owner string) error
-	CreateSection(ctx context.Context, owner, name string, sortIndex, gridWidth int) (string, error)
-	UpdateSection(ctx context.Context, owner, id string, sortIndex, gridWidth int) error
+	DeleteCatalog(ctx context.Context) error
+	CreateSection(ctx context.Context, name string, sortIndex, gridWidth int) (string, error)
+	UpdateSection(ctx context.Context, id string, sortIndex, gridWidth int) error
 	CreateOffer(ctx context.Context, o storage.TransferOfferRow) (string, error)
 	UpdateOffer(ctx context.Context, id string, o storage.TransferOfferRow) error
-	CreateApp(ctx context.Context, owner string, a storage.TransferAppRow) (string, error)
-	UpdateApp(ctx context.Context, owner, id string, a storage.TransferAppRow) error
-	SetGatusKey(ctx context.Context, owner, id, key string) error
-	LinkLibrary(ctx context.Context, owner string, appIDs []string) error
+	CreateApp(ctx context.Context, a storage.TransferAppRow) (string, error)
+	UpdateApp(ctx context.Context, id string, a storage.TransferAppRow) error
+	SetGatusKey(ctx context.Context, id, key string) error
+	LinkLibrary(ctx context.Context, appIDs []string) error
 	PutIcon(ctx context.Context, appID, variant string, png []byte, width, height int, etag string) error
 	SetSettings(ctx context.Context, s storage.SystemSettings) error
 	CreateKid(ctx context.Context, name, avatarColor string) (string, error)
@@ -52,20 +53,20 @@ func Apply(ctx context.Context, w Writer, p *Plan) error {
 		}
 	}
 	if o.replace {
-		if err := w.DeleteCatalog(ctx, o.owner); err != nil {
+		if err := w.DeleteCatalog(ctx); err != nil {
 			return err
 		}
 	}
 	for _, s := range o.sections {
 		if s.id == "" {
-			id, err := w.CreateSection(ctx, o.owner, s.name, s.sortIndex, s.gridWidth)
+			id, err := w.CreateSection(ctx, s.name, s.sortIndex, s.gridWidth)
 			if err != nil {
 				return err
 			}
 			secID[s.name] = id
 			continue
 		}
-		if err := w.UpdateSection(ctx, o.owner, s.id, s.sortIndex, s.gridWidth); err != nil {
+		if err := w.UpdateSection(ctx, s.id, s.sortIndex, s.gridWidth); err != nil {
 			return err
 		}
 	}
@@ -88,14 +89,14 @@ func Apply(ctx context.Context, w Writer, p *Plan) error {
 			}
 		}
 		if a.id == "" {
-			id, err := w.CreateApp(ctx, o.owner, row)
+			id, err := w.CreateApp(ctx, row)
 			if err != nil {
 				return err
 			}
 			appID[row.Slug] = id
 			continue
 		}
-		if err := w.UpdateApp(ctx, o.owner, a.id, row); err != nil {
+		if err := w.UpdateApp(ctx, a.id, row); err != nil {
 			return err
 		}
 	}
@@ -104,7 +105,7 @@ func Apply(ctx context.Context, w Writer, p *Plan) error {
 		for _, slug := range o.link {
 			ids = append(ids, appID[slug])
 		}
-		if err := w.LinkLibrary(ctx, o.owner, ids); err != nil {
+		if err := w.LinkLibrary(ctx, ids); err != nil {
 			return err
 		}
 	}
@@ -119,7 +120,7 @@ func Apply(ctx context.Context, w Writer, p *Plan) error {
 		}
 	}
 	for _, g := range o.gatus {
-		if err := w.SetGatusKey(ctx, o.owner, g.id, g.key); err != nil {
+		if err := w.SetGatusKey(ctx, g.id, g.key); err != nil {
 			return err
 		}
 	}

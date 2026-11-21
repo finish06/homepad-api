@@ -32,8 +32,8 @@ func TestMigration0019_InvitesTableIsIdempotent(t *testing.T) {
 	inv, err := store.CreateInvite(ctx, inviteHash(t), "Alex", "user", admin, 7*24*time.Hour, 0)
 	require.NoError(t, err)
 
-	require.NoError(t, store.Migrate(ctx))
-	require.NoError(t, store.Migrate(ctx))
+	rerunMigration(t, ctx, store, "0019_invites.up.sql")
+	rerunMigration(t, ctx, store, "0019_invites.up.sql")
 
 	var n int
 	require.NoError(t, store.Pool().QueryRow(ctx, `SELECT count(*) FROM invites WHERE id = $1`, inv.ID).Scan(&n))
@@ -127,37 +127,6 @@ func TestStore_InviteSurvivesItsCreator(t *testing.T) {
 	var createdBy *string
 	require.NoError(t, store.Pool().QueryRow(ctx, `SELECT created_by::text FROM invites WHERE id = $1`, inv.ID).Scan(&createdBy))
 	assert.Nil(t, createdBy)
-}
-
-// AC-026 — the startup count of catalog rows owned by an admin who is not the
-// shared catalog owner (#87's invisible rows). Rows of the owner, and rows of
-// plain users (the #224 era), are not counted.
-func TestStore_NonOwnerAdminCatalogRows(t *testing.T) {
-	store, ctx := openStore(t)
-	// Make sure an owner exists that is older than the admin created below.
-	seedStoreAdmin(t, store, ctx)
-	beforeSvc, beforeCat, err := store.NonOwnerAdminCatalogRows(ctx)
-	require.NoError(t, err)
-
-	second := seedStoreAdmin(t, store, ctx)
-	owner, err := store.SharedCatalogOwnerID(ctx)
-	require.NoError(t, err)
-	require.NotEqual(t, owner, second)
-	seedStoreService(t, store, ctx, second)
-	seedStoreService(t, store, ctx, second)
-	_, err = store.CreateCategory(ctx, second, fmt.Sprintf("orphan-%d", time.Now().UnixNano()))
-	require.NoError(t, err)
-	// The owner's own rows don't count.
-	seedStoreService(t, store, ctx, owner)
-	// Nor do a plain user's.
-	u, err := store.CreateUser(ctx, fmt.Sprintf("plain-%d@example.com", time.Now().UnixNano()), "x", "user")
-	require.NoError(t, err)
-	seedStoreService(t, store, ctx, u.ID)
-
-	svc, cat, err := store.NonOwnerAdminCatalogRows(ctx)
-	require.NoError(t, err)
-	assert.Equal(t, beforeSvc+2, svc)
-	assert.Equal(t, beforeCat+1, cat)
 }
 
 // AC-028 — CountAccounts is every account (kids too) plus pending invites.

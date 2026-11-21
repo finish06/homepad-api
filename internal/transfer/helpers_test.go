@@ -48,8 +48,8 @@ func dropIDs(ids []string, gone map[string]bool) []string {
 	return out
 }
 
-func (m *memWriter) DeleteCatalog(_ context.Context, owner string) error {
-	m.log("DeleteCatalog %s", owner)
+func (m *memWriter) DeleteCatalog(_ context.Context) error {
+	m.log("DeleteCatalog")
 	gone := map[string]bool{}
 	for _, a := range m.st.Apps {
 		gone[a.ID] = true
@@ -66,7 +66,7 @@ func (m *memWriter) DeleteCatalog(_ context.Context, owner string) error {
 	return nil
 }
 
-func (m *memWriter) CreateSection(_ context.Context, owner, name string, sortIndex, width int) (string, error) {
+func (m *memWriter) CreateSection(_ context.Context, name string, sortIndex, width int) (string, error) {
 	for _, s := range m.st.Sections {
 		if s.Name == name {
 			return "", fmt.Errorf("section %q exists", name)
@@ -78,7 +78,7 @@ func (m *memWriter) CreateSection(_ context.Context, owner, name string, sortInd
 	return id, nil
 }
 
-func (m *memWriter) UpdateSection(_ context.Context, owner, id string, sortIndex, width int) error {
+func (m *memWriter) UpdateSection(_ context.Context, id string, sortIndex, width int) error {
 	m.log("UpdateSection %s", id)
 	for i := range m.st.Sections {
 		if m.st.Sections[i].ID == id {
@@ -109,7 +109,7 @@ func (m *memWriter) UpdateOffer(_ context.Context, id string, o storage.Transfer
 	return fmt.Errorf("no offer %s", id)
 }
 
-func (m *memWriter) CreateApp(_ context.Context, owner string, a storage.TransferAppRow) (string, error) {
+func (m *memWriter) CreateApp(_ context.Context, a storage.TransferAppRow) (string, error) {
 	for _, x := range m.st.Apps {
 		if x.Slug == a.Slug {
 			return "", fmt.Errorf("slug %q taken", a.Slug)
@@ -122,7 +122,7 @@ func (m *memWriter) CreateApp(_ context.Context, owner string, a storage.Transfe
 	return id, nil
 }
 
-func (m *memWriter) UpdateApp(_ context.Context, owner, id string, a storage.TransferAppRow) error {
+func (m *memWriter) UpdateApp(_ context.Context, id string, a storage.TransferAppRow) error {
 	m.log("UpdateApp %s", a.Slug)
 	for i := range m.st.Apps {
 		x := &m.st.Apps[i]
@@ -135,7 +135,7 @@ func (m *memWriter) UpdateApp(_ context.Context, owner, id string, a storage.Tra
 	return fmt.Errorf("no app %s", id)
 }
 
-func (m *memWriter) SetGatusKey(_ context.Context, owner, id, key string) error {
+func (m *memWriter) SetGatusKey(_ context.Context, id, key string) error {
 	m.log("SetGatusKey %s %s", id, key)
 	for i := range m.st.Apps {
 		if m.st.Apps[i].ID == id {
@@ -146,7 +146,7 @@ func (m *memWriter) SetGatusKey(_ context.Context, owner, id, key string) error 
 	return fmt.Errorf("no app %s", id)
 }
 
-func (m *memWriter) LinkLibrary(_ context.Context, owner string, appIDs []string) error {
+func (m *memWriter) LinkLibrary(_ context.Context, appIDs []string) error {
 	want := map[string]bool{}
 	for _, id := range appIDs {
 		want[id] = true
@@ -315,11 +315,10 @@ func apply(t *testing.T, m *memWriter, p *transfer.Plan) *storage.TransferState 
 	return m.state()
 }
 
-// freshState is a new install: one admin (the owner and the caller), plus an
-// adult who signed up with the fixture's email, and an empty catalog.
+// freshState is a new install: one admin (the caller), plus an adult who
+// signed up with the fixture's email, and an empty catalog.
 func freshState() *storage.TransferState {
 	return &storage.TransferState{
-		OwnerID:  "u-admin",
 		CallerID: "u-admin",
 		Settings: storage.SystemSettings{ShowUptimeDisplay: true},
 		People: []storage.TransferPerson{
@@ -345,9 +344,17 @@ func readFixture(t *testing.T, rel string) []byte {
 	return b
 }
 
+// decodeFixture decodes the v1 fixture, the file 17.1.0 wrote, through the
+// upgrade chain: most restore tests run on what an upgraded household brings.
 func decodeFixture(t *testing.T) *transfer.Decoded {
 	t.Helper()
-	d, perr := transfer.DecodeBackup(readFixture(t, "backups/v1.json"))
+	return decodeFixtureVersion(t, 1)
+}
+
+// decodeFixtureVersion decodes testdata/backups/v<n>.json.
+func decodeFixtureVersion(t *testing.T, n int) *transfer.Decoded {
+	t.Helper()
+	d, perr := transfer.DecodeBackup(readFixture(t, fmt.Sprintf("backups/v%d.json", n)))
 	require.Nil(t, perr)
 	return d
 }

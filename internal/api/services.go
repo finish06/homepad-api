@@ -85,20 +85,11 @@ func (s *server) handleListServices(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	owner, err := s.store.SharedCatalogOwnerID(r.Context())
-	if errors.Is(err, storage.ErrNotFound) {
-		// No admin → no shared catalog yet; serve an empty list rather than 500.
-		writeJSON(w, http.StatusOK, map[string]any{"services": []serviceView{}})
-		return
-	}
-	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-	// Shared set (owner's rows) decorated with the caller's own layout order,
+	// The household's catalog decorated with the caller's own layout order,
 	// filtered to what the caller may see (everything for an adult; the
-	// allow-list for a kid — AC-003).
-	svcs, ok := s.visibleCatalog(w, r, owner, u)
+	// allow-list for a kid — AC-003). It needs no admin to exist
+	// (SPEC-household-catalog-owner AC-003).
+	svcs, ok := s.visibleCatalog(w, r, u)
 	if !ok {
 		return
 	}
@@ -149,12 +140,10 @@ func (s *server) handleListServices(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"services": out})
 }
 
-// handleCreateService adds a service to the shared catalog. Admin-only under the
-// shared catalog model (SPEC-245-224, #224): a non-admin session gets 403. The
-// row is owned by the acting admin (the shared-catalog owner).
+// handleCreateService adds a service to the catalog. Admin-only
+// (classCatalogWrite): a non-admin session gets 403.
 func (s *server) handleCreateService(w http.ResponseWriter, r *http.Request) {
-	owner, ok := s.requireCatalogAdmin(w, r)
-	if !ok {
+	if _, ok := s.requireAdmin(w, r); !ok {
 		return
 	}
 
@@ -185,7 +174,7 @@ func (s *server) handleCreateService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sv, err := s.store.CreateService(r.Context(), owner, storage.Service{
+	sv, err := s.store.CreateService(r.Context(), storage.Service{
 		Slug:        in.Slug,
 		Name:        in.Name,
 		Description: in.Description,
@@ -215,12 +204,11 @@ func (s *server) handleCreateService(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleUpdateService edits a shared catalog service. Admin-only under the
-// shared catalog model (SPEC-245-224, #224): a non-admin session gets 403. Body
-// fields are optional — only those present are changed.
+// handleUpdateService edits a catalog service. Admin-only
+// (classCatalogWrite): a non-admin session gets 403. Body fields are optional —
+// only those present are changed.
 func (s *server) handleUpdateService(w http.ResponseWriter, r *http.Request) {
-	owner, ok := s.requireCatalogAdmin(w, r)
-	if !ok {
+	if _, ok := s.requireAdmin(w, r); !ok {
 		return
 	}
 
@@ -245,7 +233,7 @@ func (s *server) handleUpdateService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sv, err := s.store.UpdateService(r.Context(), r.PathValue("id"), owner, storage.ServiceUpdate{
+	sv, err := s.store.UpdateService(r.Context(), r.PathValue("id"), storage.ServiceUpdate{
 		Slug:        in.Slug,
 		Name:        in.Name,
 		Description: in.Description,
@@ -312,15 +300,14 @@ func (o *optionalString) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// handleDeleteService removes a shared catalog service. Admin-only under the
-// shared catalog model (SPEC-245-224, #224): a non-admin session gets 403.
+// handleDeleteService removes a catalog service. Admin-only
+// (classCatalogWrite): a non-admin session gets 403.
 func (s *server) handleDeleteService(w http.ResponseWriter, r *http.Request) {
-	owner, ok := s.requireCatalogAdmin(w, r)
-	if !ok {
+	if _, ok := s.requireAdmin(w, r); !ok {
 		return
 	}
 
-	err := s.store.DeleteService(r.Context(), r.PathValue("id"), owner)
+	err := s.store.DeleteService(r.Context(), r.PathValue("id"))
 	if errors.Is(err, storage.ErrNotFound) {
 		http.Error(w, "no such service", http.StatusNotFound)
 		return
@@ -350,21 +337,14 @@ func (s *server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	var allowedKeys map[string]bool // nil = every key (adults)
 	if vis != nil {
 		allowedKeys = map[string]bool{}
-		owner, err := s.store.SharedCatalogOwnerID(r.Context())
-		if err != nil && !errors.Is(err, storage.ErrNotFound) {
+		svcs, err := s.store.ListServices(r.Context(), u.ID)
+		if err != nil {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
-		if err == nil {
-			svcs, err := s.store.ListServices(r.Context(), owner, u.ID)
-			if err != nil {
-				http.Error(w, "internal error", http.StatusInternalServerError)
-				return
-			}
-			for _, sv := range svcs {
-				if sv.GatusKey != "" && vis.Allows(sv.ID) {
-					allowedKeys[sv.GatusKey] = true
-				}
+		for _, sv := range svcs {
+			if sv.GatusKey != "" && vis.Allows(sv.ID) {
+				allowedKeys[sv.GatusKey] = true
 			}
 		}
 	}
@@ -378,15 +358,15 @@ func (s *server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"as_of": snap.AsOf, "statuses": statuses})
 }
 
-// visibleCatalog lists the shared catalog (owner's rows, in u's layout order)
-// filtered through VisibleServiceIDs — the one way a handler reads the catalog
-// for a possibly-kid caller. On error it has written a 500.
-func (s *server) visibleCatalog(w http.ResponseWriter, r *http.Request, owner string, u storage.User) ([]storage.Service, bool) {
+// visibleCatalog lists the catalog (in u's layout order) filtered through
+// VisibleServiceIDs — the one way a handler reads the catalog for a
+// possibly-kid caller. On error it has written a 500.
+func (s *server) visibleCatalog(w http.ResponseWriter, r *http.Request, u storage.User) ([]storage.Service, bool) {
 	vis, ok := s.visibleServices(w, r, u)
 	if !ok {
 		return nil, false
 	}
-	svcs, err := s.store.ListServices(r.Context(), owner, u.ID)
+	svcs, err := s.store.ListServices(r.Context(), u.ID)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return nil, false

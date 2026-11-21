@@ -14,8 +14,8 @@ import (
 )
 
 // SPEC-backup-import §8 — export, restore and Homepage import. All five
-// routes are admin-only. Every write goes to the shared catalog owner, never
-// the acting admin's own id (AC-025, homepad-api#87). Errors are JSON
+// routes are admin-only. Every write goes to the household's catalog, whichever
+// admin runs it (SPEC-household-catalog-owner). Errors are JSON
 // ({code, message, …}) so the UI owns the words (UX §6); 401/403 stay the
 // shared plain-text answers from requireAdmin.
 
@@ -101,11 +101,7 @@ func (s *server) handleExport(w http.ResponseWriter, r *http.Request) {
 		writeTransferError(w, badRequest("bad_people", "people must be true or false"))
 		return
 	}
-	owner, ok := s.catalogOwner(w, r, "no catalog yet")
-	if !ok {
-		return
-	}
-	st, err := s.store.LoadTransferState(r.Context(), storage.TransferLoad{OwnerID: owner, CallerID: u.ID, People: people, IconBytes: true})
+	st, err := s.store.LoadTransferState(r.Context(), storage.TransferLoad{CallerID: u.ID, People: people, IconBytes: true})
 	if err != nil {
 		log.Printf("transfer: export: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -229,11 +225,7 @@ func (errPlanChanged) Error() string { return "transfer: plan changed" }
 // moved, writes everything or nothing, and logs one line (AC-030).
 func (s *server) previewOrApply(w http.ResponseWriter, r *http.Request, u storage.User, what, mode string,
 	load storage.TransferLoad, plan func(*storage.TransferState) *transfer.Plan, apply bool, want string) {
-	owner, ok := s.catalogOwner(w, r, "no catalog yet")
-	if !ok {
-		return
-	}
-	load.OwnerID, load.CallerID, load.AccountLimit = owner, u.ID, s.maxAccounts
+	load.CallerID, load.AccountLimit = u.ID, s.maxAccounts
 	if !apply {
 		st, err := s.store.LoadTransferState(r.Context(), load)
 		if err != nil {

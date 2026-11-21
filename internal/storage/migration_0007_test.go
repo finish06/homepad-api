@@ -170,7 +170,7 @@ func TestMigration0007_PopulatedCutover(t *testing.T) {
 // vacuously, indexes present, global uniques gone, no error.
 func TestMigration0007_EmptyCatalog(t *testing.T) {
 	ctx, conn := freshDB(t, "homepad_mig0007_empty")
-	applyMigrations(t, ctx, conn, "") // ALL migrations including 0007, on an empty DB
+	applyMigrations(t, ctx, conn, "0021") // every migration up to 17.1.0, on an empty DB
 
 	var libN int
 	require.NoError(t, conn.QueryRow(ctx, `SELECT count(*) FROM library_apps`).Scan(&libN))

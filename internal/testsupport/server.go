@@ -92,8 +92,9 @@ type Env struct {
 	Store    *storage.Store
 	Sessions *session.PgStore
 	DSN      string
-	// AdminID is the first admin — the shared-catalog owner. UserID is the
-	// plain user behind "non-admin-session".
+	// AdminID is the admin behind "admin-session". UserID is the plain user
+	// behind "non-admin-session". Neither owns the catalog: it belongs to the
+	// household (SPEC-household-catalog-owner).
 	AdminID string
 	UserID  string
 	// Widgets and Weather are the server's widget manager and weather
@@ -205,11 +206,10 @@ func NewEnvWithGatus(t *testing.T, endpoints map[string][]GatusResult) *Env {
 	return newServer(t, gatusStub(t, endpoints))
 }
 
-// SeedService adds a service to the shared catalog (owned by the first admin)
-// and returns its id.
+// SeedService adds a service to the catalog and returns its id.
 func (e *Env) SeedService(t *testing.T, slug, name, gatusKey string) string {
 	t.Helper()
-	return seedService(t, context.Background(), e.Store, e.AdminID, slug, name, gatusKey)
+	return seedService(t, context.Background(), e.Store, slug, name, gatusKey)
 }
 
 // SeedKid creates a kid account named name whose allow-list is allowed, and
@@ -364,14 +364,11 @@ func newServerWith(t *testing.T, gatusURL string, opts Options) *Env {
 		}
 	}
 
-	// v9 — services are per-user now. Seed each test user their OWN two
-	// monitored entries so /api/services is non-empty for whichever session a
-	// test signs in as. Gatus is gatusURL, a black hole unless a test stubs
-	// it, so all resolve UNKNOWN (A9).
-	for _, owner := range []string{admin, user} {
-		_ = seedService(t, ctx, store, owner, "gitea", "Gitea", "core_gitea")
-		_ = seedService(t, ctx, store, owner, "grafana", "Grafana", "core_grafana")
-	}
+	// The household's catalog: two monitored entries every session reads.
+	// Gatus is gatusURL, a black hole unless a test stubs it, so all resolve
+	// UNKNOWN (A9).
+	_ = seedService(t, ctx, store, "gitea", "Gitea", "core_gitea")
+	_ = seedService(t, ctx, store, "grafana", "Grafana", "core_grafana")
 
 	deps = withWidgets(t, deps, store, opts.Widgets)
 	srv := httptest.NewServer(api.New(deps))
@@ -421,9 +418,9 @@ func seedUser(t *testing.T, ctx context.Context, store *storage.Store, email, pa
 	return u.ID
 }
 
-func seedService(t *testing.T, ctx context.Context, store *storage.Store, userID, slug, name, gatusKey string) string {
+func seedService(t *testing.T, ctx context.Context, store *storage.Store, slug, name, gatusKey string) string {
 	t.Helper()
-	sv, err := store.CreateService(ctx, userID, storage.Service{
+	sv, err := store.CreateService(ctx, storage.Service{
 		Slug:     slug,
 		Name:     name,
 		URL:      "https://" + slug + ".example.com",

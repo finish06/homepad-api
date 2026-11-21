@@ -8,13 +8,11 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-// ListCategories returns userID's categories in their sort_index order. Under
-// the shared catalog model (SPEC-245-224) the API layer passes the shared
-// catalog owner's id here (SharedCatalogOwnerID), so every user reads the same
-// admin-managed set; the storage method itself stays a plain per-owner list.
-func (s *Store) ListCategories(ctx context.Context, userID string) ([]Category, error) {
+// ListCategories returns the catalog's sections in their sort_index order.
+// Every user reads the same set (SPEC-household-catalog-owner).
+func (s *Store) ListCategories(ctx context.Context) ([]Category, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, name, sort_index, grid_width FROM categories WHERE user_id = $1 ORDER BY sort_index`, userID)
+		`SELECT id, name, sort_index, grid_width FROM categories ORDER BY sort_index, name`)
 	if err != nil {
 		return nil, err
 	}
@@ -31,16 +29,16 @@ func (s *Store) ListCategories(ctx context.Context, userID string) ([]Category, 
 	return out, rows.Err()
 }
 
-// CreateCategory appends a new category owned by userID at the end (sort_index =
-// max+1 among the user's categories, or 0 when first). Returns ErrNameTaken when
-// the user already has a category with that name (names are unique per user, D3).
-func (s *Store) CreateCategory(ctx context.Context, userID, name string) (Category, error) {
+// CreateCategory appends a new section at the end (sort_index = max+1, or 0
+// when first). Returns ErrNameTaken when a section already has that name
+// (names are unique across the catalog).
+func (s *Store) CreateCategory(ctx context.Context, name string) (Category, error) {
 	var c Category
 	err := s.pool.QueryRow(ctx,
-		`INSERT INTO categories (user_id, name, sort_index)
-		 VALUES ($1, $2, COALESCE((SELECT max(sort_index) + 1 FROM categories WHERE user_id = $1), 0))
+		`INSERT INTO categories (name, sort_index)
+		 VALUES ($1, COALESCE((SELECT max(sort_index) + 1 FROM categories), 0))
 		 RETURNING id, name, sort_index, grid_width`,
-		userID, name,
+		name,
 	).Scan(&c.ID, &c.Name, &c.SortIndex, &c.GridWidth)
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -52,16 +50,15 @@ func (s *Store) CreateCategory(ctx context.Context, userID, name string) (Catego
 	return c, nil
 }
 
-// RenameCategory renames one of userID's OWN categories (v9 — owner-scoped).
-// Returns ErrNotFound when id names no category owned by userID (malformed UUID,
-// nonexistent, or another user's row → 404, D2) and ErrNameTaken on a per-user
-// name collision.
-func (s *Store) RenameCategory(ctx context.Context, id, userID, name string) (Category, error) {
+// RenameCategory renames a section. Returns ErrNotFound when id names no
+// section (malformed UUID or nonexistent → 404) and ErrNameTaken on a name
+// collision.
+func (s *Store) RenameCategory(ctx context.Context, id, name string) (Category, error) {
 	var c Category
 	err := s.pool.QueryRow(ctx,
-		`UPDATE categories SET name = $3 WHERE id = $1 AND user_id = $2
+		`UPDATE categories SET name = $2 WHERE id = $1
 		 RETURNING id, name, sort_index, grid_width`,
-		id, userID, name,
+		id, name,
 	).Scan(&c.ID, &c.Name, &c.SortIndex, &c.GridWidth)
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) {
@@ -81,11 +78,10 @@ func (s *Store) RenameCategory(ctx context.Context, id, userID, name string) (Ca
 	return c, nil
 }
 
-// SetCategoryOrder rewrites the sort_index of userID's OWN categories from
-// orderedIDs by position (v9 — owner-scoped), in one transaction. An id naming
-// no category owned by userID (foreign or nonexistent) → ErrNotFound; the prior
-// order is left intact (A14).
-func (s *Store) SetCategoryOrder(ctx context.Context, userID string, orderedIDs []string) error {
+// SetCategoryOrder rewrites the sort_index of the sections from orderedIDs by
+// position, in one transaction. An id naming no section → ErrNotFound; the
+// prior order is left intact.
+func (s *Store) SetCategoryOrder(ctx context.Context, orderedIDs []string) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -93,7 +89,7 @@ func (s *Store) SetCategoryOrder(ctx context.Context, userID string, orderedIDs 
 	defer tx.Rollback(ctx)
 
 	for i, id := range orderedIDs {
-		tag, err := tx.Exec(ctx, `UPDATE categories SET sort_index = $3 WHERE id = $1 AND user_id = $2`, id, userID, i)
+		tag, err := tx.Exec(ctx, `UPDATE categories SET sort_index = $2 WHERE id = $1`, id, i)
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "22P02" { // malformed UUID
 			return ErrNotFound
@@ -108,13 +104,11 @@ func (s *Store) SetCategoryOrder(ctx context.Context, userID string, orderedIDs 
 	return tx.Commit(ctx)
 }
 
-// DeleteCategory removes one of userID's OWN categories (v9 — owner-scoped).
-// Idempotent for the owner: deleting an absent (or malformed) id succeeds with
-// no effect. Another user's category is never touched (Invariant 2). The
-// services FK is ON DELETE SET NULL, so the category's apps fall to
-// Uncategorized — none deleted.
-func (s *Store) DeleteCategory(ctx context.Context, id, userID string) error {
-	_, err := s.pool.Exec(ctx, `DELETE FROM categories WHERE id = $1 AND user_id = $2`, id, userID)
+// DeleteCategory removes a section. Idempotent: deleting an absent (or
+// malformed) id succeeds with no effect. The services FK is ON DELETE SET
+// NULL, so the section's apps fall to Uncategorized — none deleted.
+func (s *Store) DeleteCategory(ctx context.Context, id string) error {
+	_, err := s.pool.Exec(ctx, `DELETE FROM categories WHERE id = $1`, id)
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "22P02" { // malformed UUID: nothing to delete
 		return nil
@@ -122,17 +116,16 @@ func (s *Store) DeleteCategory(ctx context.Context, id, userID string) error {
 	return err
 }
 
-// SetCategoryWidth sets the App Grid box width (grid_width) of one of userID's
-// OWN categories (SPEC-app-grid §3B — owner-scoped, matching RenameCategory).
-// The caller validates width ∈ 1–8; the DB CHECK is the floor. Returns
-// ErrNotFound when id names no category owned by userID (malformed UUID,
-// nonexistent, or another user's row → 404).
-func (s *Store) SetCategoryWidth(ctx context.Context, id, userID string, width int) (Category, error) {
+// SetCategoryWidth sets the App Grid box width (grid_width) of a section
+// (SPEC-app-grid §3B). The caller validates the span; the DB CHECK is the
+// floor. Returns ErrNotFound when id names no section (malformed UUID or
+// nonexistent → 404).
+func (s *Store) SetCategoryWidth(ctx context.Context, id string, width int) (Category, error) {
 	var c Category
 	err := s.pool.QueryRow(ctx,
-		`UPDATE categories SET grid_width = $3 WHERE id = $1 AND user_id = $2
+		`UPDATE categories SET grid_width = $2 WHERE id = $1
 		 RETURNING id, name, sort_index, grid_width`,
-		id, userID, width,
+		id, width,
 	).Scan(&c.ID, &c.Name, &c.SortIndex, &c.GridWidth)
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "22P02" { // malformed UUID: no such category
