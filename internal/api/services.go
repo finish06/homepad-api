@@ -31,6 +31,11 @@ type serviceView struct {
 	// 'iframe'. Always present on the wire (DB default 'new_tab'); a pre-migration
 	// client that omits it is treated as new_tab by the frontend.
 	ClickAction string `json:"clickAction"`
+	// IframeSameOrigin (SPEC-iframe-sandbox-optin) is "Let this app keep its
+	// sign-in". The overlay adds allow-same-origin to its sandbox only when it
+	// is on and the app is on another origin. Always present; kids get it too,
+	// so their overlay behaves like everyone else's.
+	IframeSameOrigin bool `json:"iframeSameOrigin"`
 	// GatusKey (v25) is the Gatus endpoint slug backing the tile's health meter,
 	// "" when the tile is unmonitored. Always present on the wire so the
 	// TileEditModal can prefill the current key. Additive — clients ignoring it
@@ -116,25 +121,26 @@ func (s *server) handleListServices(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		out = append(out, serviceView{
-			ID:              sv.ID,
-			Slug:            sv.Slug,
-			Name:            sv.Name,
-			Description:     sv.Description,
-			URL:             sv.URL,
-			Icon:            sv.Icon,
-			Status:          statusFor(snap, sv.GatusKey),
-			Favorite:        favs[sv.ID],
-			IconLight:       icons[sv.ID].Light,
-			IconDark:        icons[sv.ID].Dark,
-			CategoryID:      sv.CategoryID,
-			CategoryName:    sv.CategoryName,
-			SourceLibraryID: sv.SourceLibraryID,
-			ClickAction:     sv.ClickAction,
-			GatusKey:        sv.GatusKey,
-			UptimeChecks:    uptimeChecksFor(snap, sv.GatusKey),
-			UptimeWindows:   uptimeWindowsFor(snap, sv.GatusKey),
-			ResponseTimeMs:  responseTimeMsFor(snap, sv.GatusKey),
-			Widget:          widget,
+			ID:               sv.ID,
+			Slug:             sv.Slug,
+			Name:             sv.Name,
+			Description:      sv.Description,
+			URL:              sv.URL,
+			Icon:             sv.Icon,
+			Status:           statusFor(snap, sv.GatusKey),
+			Favorite:         favs[sv.ID],
+			IconLight:        icons[sv.ID].Light,
+			IconDark:         icons[sv.ID].Dark,
+			CategoryID:       sv.CategoryID,
+			CategoryName:     sv.CategoryName,
+			SourceLibraryID:  sv.SourceLibraryID,
+			ClickAction:      sv.ClickAction,
+			IframeSameOrigin: sv.IframeSameOrigin,
+			GatusKey:         sv.GatusKey,
+			UptimeChecks:     uptimeChecksFor(snap, sv.GatusKey),
+			UptimeWindows:    uptimeWindowsFor(snap, sv.GatusKey),
+			ResponseTimeMs:   responseTimeMsFor(snap, sv.GatusKey),
+			Widget:           widget,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"services": out})
@@ -155,9 +161,10 @@ func (s *server) handleCreateService(w http.ResponseWriter, r *http.Request) {
 		Icon        string `json:"icon"`
 		GatusKey    string `json:"gatus_key"`
 		ClickAction string `json:"clickAction"`
+		// SPEC-iframe-sandbox-optin AC-009 — optional, default false.
+		IframeSameOrigin strictBool `json:"iframeSameOrigin"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+	if !decodeServiceBody(w, r, &in) {
 		return
 	}
 	in.Slug = strings.TrimSpace(in.Slug)
@@ -182,6 +189,8 @@ func (s *server) handleCreateService(w http.ResponseWriter, r *http.Request) {
 		Icon:        in.Icon,
 		GatusKey:    strings.TrimSpace(in.GatusKey),
 		ClickAction: in.ClickAction,
+		// An omitted field is the zero value: off (AC-008, new apps start strict).
+		IframeSameOrigin: in.IframeSameOrigin.Value,
 	})
 	if errors.Is(err, storage.ErrSlugTaken) {
 		http.Error(w, "a service with that slug already exists", http.StatusConflict)
@@ -201,6 +210,8 @@ func (s *server) handleCreateService(w http.ResponseWriter, r *http.Request) {
 		Icon:        sv.Icon,
 		Status:      statusFor(s.poller.Snapshot(), sv.GatusKey),
 		ClickAction: sv.ClickAction,
+		// The create response carries it like the list does.
+		IframeSameOrigin: sv.IframeSameOrigin,
 	})
 }
 
@@ -221,9 +232,10 @@ func (s *server) handleUpdateService(w http.ResponseWriter, r *http.Request) {
 		GatusKey    *string        `json:"gatus_key"`
 		CategoryID  optionalString `json:"categoryId"`
 		ClickAction *string        `json:"clickAction"`
+		// SPEC-iframe-sandbox-optin AC-009 — absent leaves it unchanged.
+		IframeSameOrigin strictBool `json:"iframeSameOrigin"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+	if !decodeServiceBody(w, r, &in) {
 		return
 	}
 	// v23 — when clickAction is present it must be a valid enum value (an explicit
@@ -234,15 +246,16 @@ func (s *server) handleUpdateService(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sv, err := s.store.UpdateService(r.Context(), r.PathValue("id"), storage.ServiceUpdate{
-		Slug:        in.Slug,
-		Name:        in.Name,
-		Description: in.Description,
-		URL:         in.URL,
-		Icon:        in.Icon,
-		GatusKey:    in.GatusKey,
-		SetCategory: in.CategoryID.Set,
-		CategoryID:  in.CategoryID.Value,
-		ClickAction: in.ClickAction,
+		Slug:             in.Slug,
+		Name:             in.Name,
+		Description:      in.Description,
+		URL:              in.URL,
+		Icon:             in.Icon,
+		GatusKey:         in.GatusKey,
+		SetCategory:      in.CategoryID.Set,
+		CategoryID:       in.CategoryID.Value,
+		ClickAction:      in.ClickAction,
+		IframeSameOrigin: in.IframeSameOrigin.ptr(),
 	})
 	if errors.Is(err, storage.ErrCategoryNotFound) {
 		http.Error(w, "no such category", http.StatusBadRequest)
@@ -262,19 +275,67 @@ func (s *server) handleUpdateService(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, serviceView{
-		ID:              sv.ID,
-		Slug:            sv.Slug,
-		Name:            sv.Name,
-		Description:     sv.Description,
-		URL:             sv.URL,
-		Icon:            sv.Icon,
-		Status:          statusFor(s.poller.Snapshot(), sv.GatusKey),
-		CategoryID:      sv.CategoryID,
-		CategoryName:    sv.CategoryName,
-		SourceLibraryID: sv.SourceLibraryID,
-		ClickAction:     sv.ClickAction,
-		GatusKey:        sv.GatusKey,
+		ID:               sv.ID,
+		Slug:             sv.Slug,
+		Name:             sv.Name,
+		Description:      sv.Description,
+		URL:              sv.URL,
+		Icon:             sv.Icon,
+		Status:           statusFor(s.poller.Snapshot(), sv.GatusKey),
+		CategoryID:       sv.CategoryID,
+		CategoryName:     sv.CategoryName,
+		SourceLibraryID:  sv.SourceLibraryID,
+		ClickAction:      sv.ClickAction,
+		IframeSameOrigin: sv.IframeSameOrigin,
+		GatusKey:         sv.GatusKey,
 	})
+}
+
+// errNotABool is strictBool's refusal of any JSON value but true or false.
+var errNotABool = errors.New("iframeSameOrigin must be true or false")
+
+// strictBool is an optional JSON boolean that refuses every other type,
+// null included (SPEC-iframe-sandbox-optin AC-009). Set is false when the key
+// is absent: UnmarshalJSON only runs for a key that is present.
+type strictBool struct {
+	Set   bool
+	Value bool
+}
+
+func (b *strictBool) UnmarshalJSON(data []byte) error {
+	switch string(data) {
+	case "true":
+		b.Set, b.Value = true, true
+	case "false":
+		b.Set, b.Value = true, false
+	default:
+		return errNotABool
+	}
+	return nil
+}
+
+// ptr is nil when the key was absent, so storage leaves the value alone.
+func (b strictBool) ptr() *bool {
+	if !b.Set {
+		return nil
+	}
+	v := b.Value
+	return &v
+}
+
+// decodeServiceBody decodes a service create or update body. On a bad body it
+// writes the 400 and returns false.
+func decodeServiceBody(w http.ResponseWriter, r *http.Request, dst any) bool {
+	err := json.NewDecoder(r.Body).Decode(dst)
+	switch {
+	case errors.Is(err, errNotABool):
+		http.Error(w, errNotABool.Error(), http.StatusBadRequest)
+		return false
+	case err != nil:
+		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		return false
+	}
+	return true
 }
 
 // optionalString distinguishes JSON's three states for a nullable field: the

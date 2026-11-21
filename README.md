@@ -61,6 +61,12 @@ stubs remain. `go test ./...` runs 26 tests green; `go vet ./...` clean.
   edit / delete (non-admin → 403). No account owns the catalog (migration
   `0021`, 18.0.0), so deleting an account never deletes an app. Slugs and
   section names are unique across the catalog.
+- **Overlay sign-in** — each app has `iframeSameOrigin` (migration `0023`,
+  18.0.0), the tile editor's "Let this app keep its sign-in". The overlay
+  keeps the app's own origin only when it is on. Admins set it on
+  `POST`/`PATCH /api/services`; anything but `true` or `false` is a 400. The
+  upgrade turns it on for apps already set to Inline overlay. New apps start
+  with it off.
 - **Migrations** — each `migrations/*.up.sql` runs once, in order, and is
   recorded in `schema_migrations`, all in one transaction under an advisory
   lock. A failed file records nothing, so the next boot tries again. `0021`
@@ -123,8 +129,10 @@ whichever admin runs it. A backup holds no ids, password hashes,
 sessions, OIDC or env config, or the Gatus URL; its JSON Schema is
 [`docs/schema/homepad-backup-v2.json`](docs/schema/homepad-backup-v2.json).
 18.0.0 writes `schemaVersion` 2, with the same keys as version 1
-([`homepad-backup-v1.json`](docs/schema/homepad-backup-v1.json)); it still
-restores version 1 files. Homepad 17.x refuses a version 2 file.
+([`homepad-backup-v1.json`](docs/schema/homepad-backup-v1.json)), plus an
+optional `iframeSameOrigin` on each app; it still restores version 1 files. A
+file without `iframeSameOrigin` leaves an existing app's value alone, and a new
+app gets `false`. Homepad 17.x refuses a version 2 file.
 Homepage `widget`, `widgets` and `providers` values are dropped while parsing
 and never stored, logged or returned. `url` and `icon` written by these routes
 are always `http(s)` or empty. Limits: a backup up to 16 MB, each Homepage file

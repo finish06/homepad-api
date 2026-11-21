@@ -74,7 +74,13 @@ func TestRestore_OntoAFreshInstall(t *testing.T) {
 	want := d.File
 	assert.Equal(t, want.Settings, out.Settings)
 	assert.Equal(t, want.Sections, out.Sections)
-	assert.Equal(t, want.Apps, out.Apps, "every field and every icon")
+	// The v1 file has no iframeSameOrigin; the export writes it, off for
+	// every app the restore created (SPEC-iframe-sandbox-optin AC-011).
+	wantApps := append([]transfer.App(nil), want.Apps...)
+	for i := range wantApps {
+		wantApps[i].IframeSameOrigin = boolp(false)
+	}
+	assert.Equal(t, wantApps, out.Apps, "every field and every icon")
 	assert.Equal(t, want.Library, out.Library)
 	assert.Equal(t, want.People.Kids, out.People.Kids)
 	gotAlex := *outAdult(t, out, "alex@example.com")
