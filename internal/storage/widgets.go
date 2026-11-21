@@ -11,10 +11,10 @@ import (
 
 // Status widgets (SPEC-status-widgets §9, migration 0020).
 //
-// A widget belongs to its service row, which belongs to the shared-catalog
-// owner, so a widget is shared catalog data (SPEC-245-224). The key is stored
-// only as AES-256-GCM ciphertext plus its nonce; this package never sees the
-// plaintext.
+// A widget belongs to its service row, which belongs to the household's
+// catalog, so a widget is catalog data (SPEC-household-catalog-owner). The
+// key is stored only as AES-256-GCM ciphertext plus its nonce; this package
+// never sees the plaintext.
 
 // Widget is one service's widget config.
 type Widget struct {

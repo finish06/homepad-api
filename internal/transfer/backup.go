@@ -15,14 +15,17 @@ import (
 	"gitea.kube.calebdunn.tech/code/homepad-api/internal/storage"
 )
 
-// SPEC-backup-import §2.3 and §3 — the backup file, schema v1.
+// SPEC-backup-import §2.3 and §3 — the backup file. Schema v2
+// (SPEC-household-catalog-owner Q5) has the same keys as v1.
 
 const (
 	// FormatName is the value of every backup's "format" key.
 	FormatName = "homepad-backup"
 	// SchemaVersion is the newest schema this server reads and the one it
-	// writes. It goes up only for a breaking change (§2.3).
-	SchemaVersion = 1
+	// writes. It goes up only for a breaking change (§2.3). 18.0.0 moved the
+	// catalog from the first admin to the household and wrote 2, so a 17.x
+	// server refuses its files as "from a newer Homepad".
+	SchemaVersion = 2
 )
 
 // Count limits per file (AC-026).
@@ -33,8 +36,8 @@ const (
 	MaxKids     = 100
 )
 
-// File is a backup, schema v1. Field order here IS the key order on disk
-// (§3: "Key order is fixed"), so don't reorder fields.
+// File is a backup, schema v2 (the same keys as v1). Field order here IS the
+// key order on disk (§3: "Key order is fixed"), so don't reorder fields.
 type File struct {
 	Format         string    `json:"format"`
 	SchemaVersion  int       `json:"schemaVersion"`
@@ -283,7 +286,12 @@ type Decoded struct {
 // upgraders[v] turns a version-v file into a version v+1 file. One per
 // version step, run in order before planning (§2.3, AC-017). Every released
 // version keeps its fixture in testdata/backups and its step here.
-var upgraders = map[int]func(map[string]any) (map[string]any, error){}
+var upgraders = map[int]func(map[string]any) (map[string]any, error){
+	// 1→2 (18.0.0): the same keys. The catalog stopped belonging to the first
+	// admin, which a v1 file never named, so only the number changes; the
+	// loop below sets it.
+	1: func(f map[string]any) (map[string]any, error) { return f, nil },
+}
 
 const (
 	msgNotABackup  = "This isn't a Homepad backup file."
@@ -364,8 +372,8 @@ func kidCount(p *People) int {
 	return len(p.Kids)
 }
 
-// shape is the set of keys schema v1 knows, per object, for counting the
-// ones it doesn't (AC-018).
+// shape is the set of keys schema v2 (the same as v1) knows, per object, for
+// counting the ones it doesn't (AC-018).
 type shape struct {
 	keys map[string]*shape // object: known keys (nil value = a leaf)
 	elem *shape            // array: the element shape

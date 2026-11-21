@@ -151,20 +151,3 @@ func (s *Store) CreateOIDCUser(ctx context.Context, email, passwordHash, role st
 	})
 	return u, err
 }
-
-// NonOwnerAdminCatalogRows counts the catalog rows owned by an admin who is
-// not the shared catalog owner: what a second admin "created" before #87,
-// which nobody's dashboard shows (AC-026). Rows of plain users (the #224 era)
-// are not counted; they were never admin writes.
-func (s *Store) NonOwnerAdminCatalogRows(ctx context.Context) (services, categories int, err error) {
-	err = s.pool.QueryRow(ctx,
-		`WITH owner AS (
-		   SELECT id FROM users WHERE role = 'admin' ORDER BY created_at, id LIMIT 1
-		 ), others AS (
-		   SELECT id FROM users WHERE role = 'admin' AND id <> (SELECT id FROM owner)
-		 )
-		 SELECT (SELECT count(*) FROM services   WHERE user_id IN (SELECT id FROM others)),
-		        (SELECT count(*) FROM categories WHERE user_id IN (SELECT id FROM others))`,
-	).Scan(&services, &categories)
-	return services, categories, err
-}

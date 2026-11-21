@@ -31,10 +31,16 @@ func main() {
 	}
 	defer store.Close()
 
-	if err := store.Migrate(ctx); err != nil {
+	migrated, err := store.MigrateReport(ctx)
+	if err != nil {
 		log.Fatalf("migrate: %v", err)
 	}
-	log.Println("migrations applied")
+	log.Printf("migrations applied (%d new)", len(migrated.Applied))
+	// SPEC-household-catalog-owner AC-005 — the first 18.0.0 boot moves the
+	// catalog rows no dashboard showed to catalog_archive; say how many, once.
+	if line := migrated.ArchiveLine(); line != "" {
+		log.Print(line)
+	}
 
 	// homepad-db is ephemeral (emptyDir) in prod, so a pod restart wipes the
 	// catalog. Self-heal: seed the App Library from the committed catalog when
@@ -86,15 +92,6 @@ func main() {
 	}
 	if maxAccounts > 0 {
 		log.Printf("accounts: limit %d (HOMEPAD_MAX_ACCOUNTS)", maxAccounts)
-	}
-
-	// #87 — catalog rows a second admin "created" before every admin wrote to
-	// the shared catalog are left where they are (Q7); say how many there are.
-	if svcs, cats, err := store.NonOwnerAdminCatalogRows(ctx); err != nil {
-		log.Printf("catalog: count non-owner admin rows: %v", err)
-	} else if svcs+cats > 0 {
-		log.Printf("catalog: %d services and %d categories belong to an admin who is not the catalog owner; "+
-			"they were never shown and are left in place (#87)", svcs, cats)
 	}
 
 	// Sessions persist in Postgres (migration 0017), so a restart or deploy no

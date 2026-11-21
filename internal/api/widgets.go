@@ -254,15 +254,11 @@ func decodeWidgetInput(w http.ResponseWriter, r *http.Request) (widgetInput, boo
 	return in, true
 }
 
-// widgetService resolves {id} to a shared-catalog service and its tile URL.
-// On failure it has written the response.
+// widgetService resolves {id} to a catalog service and its tile URL. On
+// failure it has written the response.
 func (s *server) widgetService(w http.ResponseWriter, r *http.Request) (id, tileURL string, ok bool) {
-	owner, ok := s.catalogOwner(w, r, "no such service")
-	if !ok {
-		return "", "", false
-	}
 	id = r.PathValue("id")
-	tileURL, err := s.store.ServiceURL(r.Context(), id, owner)
+	tileURL, err := s.store.ServiceURL(r.Context(), id)
 	if errors.Is(err, storage.ErrNotFound) {
 		http.Error(w, "no such service", http.StatusNotFound)
 		return "", "", false

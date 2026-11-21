@@ -43,16 +43,15 @@ type LibraryAppUpdate struct {
 }
 
 // ListLibrary returns every offer in sort_index order, each tagged with whether
-// userID already holds a copy (the `added` hint, A9). The API passes the
-// shared catalog owner, so the hint is the same for every caller (#87); ""
-// (no admin yet) marks nothing added.
-func (s *Store) ListLibrary(ctx context.Context, userID string) ([]LibraryOffer, error) {
+// the catalog already holds a copy (the `added` hint, A9): true when any app
+// has the offer as its source_library_id (SPEC-household-catalog-owner
+// AC-014). The hint is the same for every caller.
+func (s *Store) ListLibrary(ctx context.Context) ([]LibraryOffer, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT la.id, la.name, la.url, la.icon, la.description, la.suggested_category, la.sort_index,
-		        EXISTS (SELECT 1 FROM services s
-		                 WHERE s.user_id = NULLIF($1, '')::uuid AND s.source_library_id = la.id) AS added
+		        EXISTS (SELECT 1 FROM services s WHERE s.source_library_id = la.id) AS added
 		   FROM library_apps la
-		  ORDER BY la.sort_index`, userID)
+		  ORDER BY la.sort_index`)
 	if err != nil {
 		return nil, err
 	}
@@ -141,15 +140,15 @@ func (s *Store) SetLibraryOrder(ctx context.Context, orderedIDs []string) error 
 	return tx.Commit(ctx)
 }
 
-// AddFromLibrary copies an offer onto userID's OWN dashboard (A10): it reads the
-// offer's name/url/icon/description and inserts a NEW per-user services row with
+// AddFromLibrary copies an offer into the catalog (A10): it reads the offer's
+// name/url/icon/description and inserts a NEW services row with
 // source_library_id set for provenance (C1), gatus_key empty (status wiring is
-// not copied), and a slug derived from the name made unique within the caller's
-// services. categoryID, when non-nil, must name one of the caller's OWN
-// categories (A11) — else ErrCategoryNotFound (→400); nil lands Uncategorized
-// (D4). Returns ErrNotFound when the offer id is unknown (or malformed). Adding
-// the same offer twice yields a second copy — never deduped (D6).
-func (s *Store) AddFromLibrary(ctx context.Context, userID, libraryID string, categoryID *string) (Service, error) {
+// not copied), and a slug derived from the name made unique across the
+// catalog. categoryID, when non-nil, must name a section (A11) — else
+// ErrCategoryNotFound (→400); nil lands Uncategorized (D4). Returns
+// ErrNotFound when the offer id is unknown (or malformed). Adding the same
+// offer twice yields a second copy — never deduped (D6).
+func (s *Store) AddFromLibrary(ctx context.Context, libraryID string, categoryID *string) (Service, error) {
 	var off LibraryApp
 	err := s.pool.QueryRow(ctx,
 		`SELECT id, name, url, icon, description FROM library_apps WHERE id = $1`, libraryID,
@@ -165,9 +164,9 @@ func (s *Store) AddFromLibrary(ctx context.Context, userID, libraryID string, ca
 		return Service{}, err
 	}
 
-	// A category assignment must be the caller's own (A7/A11); nil is Uncategorized.
+	// A category assignment must name a section (A11); nil is Uncategorized.
 	if categoryID != nil {
-		if err := s.categoryOwnedBy(ctx, *categoryID, userID); err != nil {
+		if err := s.categoryExists(ctx, *categoryID); err != nil {
 			return Service{}, err // ErrCategoryNotFound → 400
 		}
 	}
@@ -176,8 +175,7 @@ func (s *Store) AddFromLibrary(ctx context.Context, userID, libraryID string, ca
 	if base == "" {
 		base = "app"
 	}
-	// Try base, base-2, base-3 … until the per-user unique slug index (§5.2)
-	// accepts one. The bound is a safety net; real catalogs never approach it.
+	// Try base, base-2, base-3 … until the unique slug index accepts one. The bound is a safety net; real catalogs never approach it.
 	for i := 1; i <= 1000; i++ {
 		slug := base
 		if i > 1 {
@@ -186,15 +184,15 @@ func (s *Store) AddFromLibrary(ctx context.Context, userID, libraryID string, ca
 		var sv Service
 		err := s.pool.QueryRow(ctx,
 			`WITH ins AS (
-			   INSERT INTO services (user_id, slug, name, description, url, icon, source_library_id, category_id)
-			   VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+			   INSERT INTO services (slug, name, description, url, icon, source_library_id, category_id)
+			   VALUES ($1, $2, $3, $4, $5, $6, $7)
 			   RETURNING id, slug, name, description, url, icon, gatus_key, category_id, source_library_id
 			 )
 			 SELECT i.id, i.slug, i.name, i.description, i.url, i.icon, COALESCE(i.gatus_key, ''),
 			        i.category_id, c.name, i.source_library_id
 			   FROM ins i
 			   LEFT JOIN categories c ON c.id = i.category_id`,
-			userID, slug, off.Name, off.Description, off.URL, off.Icon, off.ID, categoryID,
+			slug, off.Name, off.Description, off.URL, off.Icon, off.ID, categoryID,
 		).Scan(&sv.ID, &sv.Slug, &sv.Name, &sv.Description, &sv.URL, &sv.Icon, &sv.GatusKey,
 			&sv.CategoryID, &sv.CategoryName, &sv.SourceLibraryID)
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" { // slug collision → try the next suffix

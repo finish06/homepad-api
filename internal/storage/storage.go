@@ -37,23 +37,6 @@ type Store struct {
 	pool *pgxpool.Pool
 }
 
-// SharedCatalogOwnerID returns the id of the first admin — the owner of the
-// shared catalog (SPEC-245-224). It mirrors migration 0007's cutover, which
-// assigned every category/service to `(role='admin' ORDER BY created_at, id
-// LIMIT 1)`. Catalog reads resolve this owner and list ITS rows, so every
-// authenticated user sees the same admin-managed grid (#245) and non-admin
-// rows created during the #224 era never pollute it. ErrNotFound when no admin
-// exists (a degenerate install) so the caller can serve an empty catalog.
-func (s *Store) SharedCatalogOwnerID(ctx context.Context) (string, error) {
-	var id string
-	err := s.pool.QueryRow(ctx,
-		`SELECT id FROM users WHERE role = 'admin' ORDER BY created_at, id LIMIT 1`).Scan(&id)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return "", ErrNotFound
-	}
-	return id, err
-}
-
 type User struct {
 	ID           string
 	Email        string
@@ -156,36 +139,118 @@ func Open(ctx context.Context, dsn string) (*Store, error) {
 // binaries sharing a DB, or multiple replicas migrating on boot.
 const migrateLockKey = 0x686f6d6570616431 // "homepad1"
 
-// Migrate applies every embedded *.up.sql migration in lexical order, inside a
-// single transaction guarded by a session advisory lock so concurrent
-// migrators serialize. The migrations use IF NOT EXISTS, so re-running is a
-// no-op.
+// householdCatalogMigration is 0021, the one-way move of the catalog from
+// the first admin to the household (SPEC-household-catalog-owner §6.2).
+const householdCatalogMigration = "0021_household_catalog.up.sql"
+
+// MigrateReport says what one migration run did.
+type MigrateReport struct {
+	// Applied is every file this run executed, in order. Empty when the
+	// database was up to date.
+	Applied []string
+	// ArchivedServices and ArchivedSections are the rows 0021 moved to
+	// catalog_archive, when this run applied 0021.
+	ArchivedServices, ArchivedSections int
+}
+
+// ArchiveLine is the one startup log line for the rows 0021 archived (AC-005),
+// or "" when this run archived nothing, as on every boot after the first.
+func (r MigrateReport) ArchiveLine() string {
+	if r.ArchivedServices+r.ArchivedSections == 0 {
+		return ""
+	}
+	return fmt.Sprintf("catalog: archived %d services and %d sections that no dashboard showed (catalog_archive)",
+		r.ArchivedServices, r.ArchivedSections)
+}
+
+// Migrate applies the embedded migrations that have not run yet. See
+// MigrateReport.
 func (s *Store) Migrate(ctx context.Context) error {
-	names, err := fs.Glob(migrations.FS, "*.up.sql")
+	_, err := s.MigrateReport(ctx)
+	return err
+}
+
+// MigrateReport applies every embedded *.up.sql not yet recorded in
+// schema_migrations, in lexical order, and records each one
+// (SPEC-household-catalog-owner §6.1). It all runs in one transaction under an
+// advisory lock, so concurrent migrators serialize, and a failed file records
+// nothing: the next boot tries again. A database from before
+// schema_migrations existed (17.x) re-runs every file once; they were written
+// to be re-run.
+func (s *Store) MigrateReport(ctx context.Context) (MigrateReport, error) {
+	return s.migrate(ctx, migrations.FS)
+}
+
+func (s *Store) migrate(ctx context.Context, fsys fs.FS) (MigrateReport, error) {
+	var rep MigrateReport
+	names, err := fs.Glob(fsys, "*.up.sql")
 	if err != nil {
-		return err
+		return rep, err
 	}
 	sort.Strings(names)
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return err
+		return rep, err
 	}
 	defer tx.Rollback(ctx)
 
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, int64(migrateLockKey)); err != nil {
-		return fmt.Errorf("storage.Migrate: acquire lock: %w", err)
+		return rep, fmt.Errorf("storage.Migrate: acquire lock: %w", err)
 	}
+	if _, err := tx.Exec(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
+		    name        TEXT        PRIMARY KEY,
+		    applied_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+		)`); err != nil {
+		return rep, fmt.Errorf("storage.Migrate: schema_migrations: %w", err)
+	}
+	rows, err := tx.Query(ctx, `SELECT name FROM schema_migrations`)
+	if err != nil {
+		return rep, fmt.Errorf("storage.Migrate: read schema_migrations: %w", err)
+	}
+	done, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return rep, fmt.Errorf("storage.Migrate: read schema_migrations: %w", err)
+	}
+	recorded := make(map[string]bool, len(done))
+	for _, name := range done {
+		recorded[name] = true
+	}
+
 	for _, name := range names {
-		sqlBytes, err := migrations.FS.ReadFile(name)
+		if recorded[name] {
+			continue
+		}
+		sqlBytes, err := fs.ReadFile(fsys, name)
 		if err != nil {
-			return err
+			return rep, err
 		}
 		if _, err := tx.Exec(ctx, string(sqlBytes)); err != nil {
-			return fmt.Errorf("storage.Migrate: %s: %w", name, err)
+			// A RAISE EXCEPTION in a migration is a message for the person
+			// running the upgrade (AC-009): pass it on as it is.
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == "P0001" {
+				return rep, errors.New(pgErr.Message)
+			}
+			return rep, fmt.Errorf("storage.Migrate: %s: %w", name, err)
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO schema_migrations (name) VALUES ($1)`, name); err != nil {
+			return rep, fmt.Errorf("storage.Migrate: record %s: %w", name, err)
+		}
+		rep.Applied = append(rep.Applied, name)
+		if name == householdCatalogMigration {
+			// 0021 runs once, so every archived row is from this run.
+			if err := tx.QueryRow(ctx, `SELECT count(*) FILTER (WHERE kind = 'service'),
+				count(*) FILTER (WHERE kind = 'category') FROM catalog_archive`).
+				Scan(&rep.ArchivedServices, &rep.ArchivedSections); err != nil {
+				return rep, fmt.Errorf("storage.Migrate: count catalog_archive: %w", err)
+			}
 		}
 	}
-	return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return MigrateReport{}, err
+	}
+	return rep, nil
 }
 
 func (s *Store) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
@@ -291,21 +356,18 @@ func (s *Store) SetShowHealthBar(ctx context.Context, userID string, show bool) 
 	return nil
 }
 
-// ListServices returns ownerID's services decorated with viewerID's personal
-// layout order (A5/A6): services the viewer has placed come first by their saved
-// sort_index, then the rest in name order. Under the shared catalog model
-// (SPEC-245-224) the API passes the shared catalog owner as ownerID and the
-// calling user as viewerID, so every user reads the same admin-managed set
-// (#245) but keeps their OWN layout ordering of it.
-func (s *Store) ListServices(ctx context.Context, ownerID, viewerID string) ([]Service, error) {
+// ListServices returns the household's catalog decorated with viewerID's
+// personal layout order (A5/A6): services the viewer has placed come first by
+// their saved sort_index, then the rest in name order. Every user reads the
+// same set and keeps their OWN ordering of it (SPEC-household-catalog-owner).
+func (s *Store) ListServices(ctx context.Context, viewerID string) ([]Service, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT s.id, s.slug, s.name, s.description, s.url, s.icon, COALESCE(s.gatus_key, ''),
 		        s.category_id, c.name, s.source_library_id, s.click_action
 		   FROM services s
-		   LEFT JOIN user_layout ul ON ul.service_id = s.id AND ul.user_id = $2
+		   LEFT JOIN user_layout ul ON ul.service_id = s.id AND ul.user_id = $1
 		   LEFT JOIN categories c   ON c.id = s.category_id
-		  WHERE s.user_id = $1
-		  ORDER BY ul.sort_index NULLS LAST, s.name`, ownerID, viewerID)
+		  ORDER BY ul.sort_index NULLS LAST, s.name`, viewerID)
 	if err != nil {
 		return nil, err
 	}
@@ -323,10 +385,9 @@ func (s *Store) ListServices(ctx context.Context, ownerID, viewerID string) ([]S
 	return out, rows.Err()
 }
 
-// CreateService inserts a catalog entry owned by userID (v9 — per-user). An
-// empty GatusKey is stored as NULL. Slug uniqueness is per-user (§5.2), so two
-// users may each hold the same slug; the same user may not (ErrSlugTaken).
-func (s *Store) CreateService(ctx context.Context, userID string, in Service) (Service, error) {
+// CreateService adds an app to the catalog. An empty GatusKey is stored as
+// NULL. Slugs are unique across the catalog (ErrSlugTaken).
+func (s *Store) CreateService(ctx context.Context, in Service) (Service, error) {
 	var gatusKey *string
 	if in.GatusKey != "" {
 		gatusKey = &in.GatusKey
@@ -340,10 +401,10 @@ func (s *Store) CreateService(ctx context.Context, userID string, in Service) (S
 	}
 	var sv Service
 	err := s.pool.QueryRow(ctx,
-		`INSERT INTO services (user_id, slug, name, description, url, icon, gatus_key, click_action)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		`INSERT INTO services (slug, name, description, url, icon, gatus_key, click_action)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)
 		 RETURNING id, slug, name, description, url, icon, COALESCE(gatus_key, ''), click_action`,
-		userID, in.Slug, in.Name, in.Description, in.URL, in.Icon, gatusKey, clickAction,
+		in.Slug, in.Name, in.Description, in.URL, in.Icon, gatusKey, clickAction,
 	).Scan(&sv.ID, &sv.Slug, &sv.Name, &sv.Description, &sv.URL, &sv.Icon, &sv.GatusKey, &sv.ClickAction)
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -375,23 +436,21 @@ type ServiceUpdate struct {
 	ClickAction *string
 }
 
-// UpdateService applies a partial patch to userID's OWN service and returns the
-// updated row (v9 — owner-scoped). Returns ErrNotFound when id names no service
-// owned by userID (including a malformed UUID or another user's row → 404, D2)
-// and ErrSlugTaken when the new slug collides with another of the caller's
-// entries.
-func (s *Store) UpdateService(ctx context.Context, id, userID string, in ServiceUpdate) (Service, error) {
+// UpdateService applies a partial patch to a catalog app and returns the
+// updated row. Returns ErrNotFound when id names no app (including a malformed
+// UUID) and ErrSlugTaken when the new slug collides with another app.
+func (s *Store) UpdateService(ctx context.Context, id string, in ServiceUpdate) (Service, error) {
 	setGatus := in.GatusKey != nil
 	var gatusKey *string
 	if setGatus && *in.GatusKey != "" {
 		gatusKey = in.GatusKey
 	}
 
-	// Validate an explicit category assignment up front: it must name one of
-	// the CALLER's own categories (A7), else ErrCategoryNotFound (→ 400),
-	// distinct from a missing service's 404. Clearing (nil CategoryID) is free.
+	// Validate an explicit category assignment up front: it must name a
+	// section of the catalog, else ErrCategoryNotFound (→ 400), distinct from
+	// a missing service's 404. Clearing (nil CategoryID) is free.
 	if in.SetCategory && in.CategoryID != nil {
-		if err := s.categoryOwnedBy(ctx, *in.CategoryID, userID); err != nil {
+		if err := s.categoryExists(ctx, *in.CategoryID); err != nil {
 			return Service{}, err
 		}
 	}
@@ -400,23 +459,23 @@ func (s *Store) UpdateService(ctx context.Context, id, userID string, in Service
 	err := s.pool.QueryRow(ctx,
 		`WITH updated AS (
 		   UPDATE services SET
-		     slug        = COALESCE($3, slug),
-		     name        = COALESCE($4, name),
-		     description = COALESCE($5, description),
-		     url         = COALESCE($6, url),
-		     icon        = COALESCE($7, icon),
-		     gatus_key    = CASE WHEN $8 THEN $9 ELSE gatus_key END,
-		     category_id  = CASE WHEN $10 THEN $11 ELSE category_id END,
-		     click_action = COALESCE($12, click_action),
+		     slug        = COALESCE($2, slug),
+		     name        = COALESCE($3, name),
+		     description = COALESCE($4, description),
+		     url         = COALESCE($5, url),
+		     icon        = COALESCE($6, icon),
+		     gatus_key    = CASE WHEN $7 THEN $8 ELSE gatus_key END,
+		     category_id  = CASE WHEN $9 THEN $10 ELSE category_id END,
+		     click_action = COALESCE($11, click_action),
 		     updated_at   = now()
-		   WHERE id = $1 AND user_id = $2
+		   WHERE id = $1
 		   RETURNING id, slug, name, description, url, icon, gatus_key, category_id, source_library_id, click_action
 		 )
 		 SELECT u.id, u.slug, u.name, u.description, u.url, u.icon, COALESCE(u.gatus_key, ''),
 		        u.category_id, c.name, u.source_library_id, u.click_action
 		   FROM updated u
 		   LEFT JOIN categories c ON c.id = u.category_id`,
-		id, userID, in.Slug, in.Name, in.Description, in.URL, in.Icon, setGatus, gatusKey, in.SetCategory, in.CategoryID, in.ClickAction,
+		id, in.Slug, in.Name, in.Description, in.URL, in.Icon, setGatus, gatusKey, in.SetCategory, in.CategoryID, in.ClickAction,
 	).Scan(&sv.ID, &sv.Slug, &sv.Name, &sv.Description, &sv.URL, &sv.Icon, &sv.GatusKey,
 		&sv.CategoryID, &sv.CategoryName, &sv.SourceLibraryID, &sv.ClickAction)
 	var pgErr *pgconn.PgError
@@ -437,13 +496,11 @@ func (s *Store) UpdateService(ctx context.Context, id, userID string, in Service
 	return sv, nil
 }
 
-// categoryOwnedBy returns nil when id names a category owned by userID,
-// ErrCategoryNotFound otherwise (including a malformed UUID or another user's
-// category — A7). This is the per-user replacement for the v4 global existence
-// check.
-func (s *Store) categoryOwnedBy(ctx context.Context, id, userID string) error {
+// categoryExists returns nil when id names a section of the catalog,
+// ErrCategoryNotFound otherwise (including a malformed UUID).
+func (s *Store) categoryExists(ctx context.Context, id string) error {
 	var one int
-	err := s.pool.QueryRow(ctx, `SELECT 1 FROM categories WHERE id = $1 AND user_id = $2`, id, userID).Scan(&one)
+	err := s.pool.QueryRow(ctx, `SELECT 1 FROM categories WHERE id = $1`, id).Scan(&one)
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "22P02" { // malformed UUID
 		return ErrCategoryNotFound
@@ -454,12 +511,12 @@ func (s *Store) categoryOwnedBy(ctx context.Context, id, userID string) error {
 	return err
 }
 
-// serviceOwnedBy returns nil when serviceID is owned by userID, ErrNotFound
-// otherwise (malformed UUID, nonexistent, or another user's row → 404, D2). The
-// per-user gate the icon/favorite/layout paths use to keep Invariant 2 tight.
-func (s *Store) serviceOwnedBy(ctx context.Context, serviceID, userID string) error {
+// serviceExists returns nil when serviceID names a catalog app, ErrNotFound
+// otherwise (malformed UUID or nonexistent → 404). The icon paths check it
+// first.
+func (s *Store) serviceExists(ctx context.Context, serviceID string) error {
 	var one int
-	err := s.pool.QueryRow(ctx, `SELECT 1 FROM services WHERE id = $1 AND user_id = $2`, serviceID, userID).Scan(&one)
+	err := s.pool.QueryRow(ctx, `SELECT 1 FROM services WHERE id = $1`, serviceID).Scan(&one)
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "22P02" { // malformed UUID
 		return ErrNotFound
@@ -470,12 +527,11 @@ func (s *Store) serviceOwnedBy(ctx context.Context, serviceID, userID string) er
 	return err
 }
 
-// ServiceURL returns the registered url of one of userID's OWN services (v21
-// fetch-icon). ErrNotFound when id names no service owned by userID (malformed
-// UUID, nonexistent, or another user's row) — same owner scope as PutIcon.
-func (s *Store) ServiceURL(ctx context.Context, serviceID, userID string) (string, error) {
+// ServiceURL returns the registered url of a catalog app (v21 fetch-icon,
+// widgets). ErrNotFound when id names no app (malformed UUID or nonexistent).
+func (s *Store) ServiceURL(ctx context.Context, serviceID string) (string, error) {
 	var url string
-	err := s.pool.QueryRow(ctx, `SELECT url FROM services WHERE id = $1 AND user_id = $2`, serviceID, userID).Scan(&url)
+	err := s.pool.QueryRow(ctx, `SELECT url FROM services WHERE id = $1`, serviceID).Scan(&url)
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "22P02" { // malformed UUID
 		return "", ErrNotFound
@@ -489,11 +545,11 @@ func (s *Store) ServiceURL(ctx context.Context, serviceID, userID string) (strin
 	return url, nil
 }
 
-// DeleteService removes one of userID's OWN catalog entries (v9 — owner-scoped).
-// Returns ErrNotFound when id names no service owned by userID (malformed UUID,
-// nonexistent, or another user's row → 404, D2). Favorites/layout/icons cascade.
-func (s *Store) DeleteService(ctx context.Context, id, userID string) error {
-	tag, err := s.pool.Exec(ctx, `DELETE FROM services WHERE id = $1 AND user_id = $2`, id, userID)
+// DeleteService removes a catalog app. Returns ErrNotFound when id names no
+// app (malformed UUID or nonexistent → 404). Favorites, layout, icons, the
+// widget and allow-list rows cascade.
+func (s *Store) DeleteService(ctx context.Context, id string) error {
+	tag, err := s.pool.Exec(ctx, `DELETE FROM services WHERE id = $1`, id)
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "22P02" {
 		return ErrNotFound
@@ -550,12 +606,11 @@ func (s *Store) AllIconFlags(ctx context.Context) (map[string]IconFlags, error) 
 	return out, rows.Err()
 }
 
-// GetIcon returns the stored PNG bytes and ETag for a variant of a service
-// owned by userID. The read route passes the shared catalog owner here, not
-// the requesting user (#84). Returns ErrNotFound when userID does not own the
-// service (404, D2) or the variant has no upload.
-func (s *Store) GetIcon(ctx context.Context, serviceID, userID, variant string) (Icon, error) {
-	if err := s.serviceOwnedBy(ctx, serviceID, userID); err != nil {
+// GetIcon returns the stored PNG bytes and ETag for a variant of a catalog
+// app. Returns ErrNotFound when the app doesn't exist (404) or the variant has
+// no upload.
+func (s *Store) GetIcon(ctx context.Context, serviceID, variant string) (Icon, error) {
+	if err := s.serviceExists(ctx, serviceID); err != nil {
 		return Icon{}, err
 	}
 	var ic Icon
@@ -576,12 +631,11 @@ func (s *Store) GetIcon(ctx context.Context, serviceID, userID, variant string) 
 	return ic, nil
 }
 
-// PutIcon upserts an icon variant on one of userID's OWN services (v9 —
-// owner-scoped). Returns ErrNotFound when the service is not the caller's (404,
-// D2). The upsert handles both first upload and replace (PK is (service_id,
-// variant)).
-func (s *Store) PutIcon(ctx context.Context, serviceID, userID, variant string, bytes []byte, width, height int, etag string) error {
-	if err := s.serviceOwnedBy(ctx, serviceID, userID); err != nil {
+// PutIcon upserts an icon variant on a catalog app. Returns ErrNotFound when
+// the app doesn't exist (404). The upsert handles both first upload and
+// replace (PK is (service_id, variant)).
+func (s *Store) PutIcon(ctx context.Context, serviceID, variant string, bytes []byte, width, height int, etag string) error {
+	if err := s.serviceExists(ctx, serviceID); err != nil {
 		return err
 	}
 	_, err := s.pool.Exec(ctx,
@@ -599,11 +653,11 @@ func (s *Store) PutIcon(ctx context.Context, serviceID, userID, variant string, 
 	return err
 }
 
-// DeleteIcon removes a variant on one of userID's OWN services (v9 —
-// owner-scoped). Returns ErrNotFound when the service is not the caller's (404,
-// D2). Idempotent for the owner: deleting a variant that isn't set succeeds.
-func (s *Store) DeleteIcon(ctx context.Context, serviceID, userID, variant string) error {
-	if err := s.serviceOwnedBy(ctx, serviceID, userID); err != nil {
+// DeleteIcon removes a variant on a catalog app. Returns ErrNotFound when the
+// app doesn't exist (404). Idempotent: deleting a variant that isn't set
+// succeeds.
+func (s *Store) DeleteIcon(ctx context.Context, serviceID, variant string) error {
+	if err := s.serviceExists(ctx, serviceID); err != nil {
 		return err
 	}
 	_, err := s.pool.Exec(ctx,

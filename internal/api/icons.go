@@ -49,19 +49,14 @@ func (s *server) handleGetIcon(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// A kid reads icons only for its allowed services; any other id is the
-	// same 404 as a missing icon (AC-006). Every catalog service, and so every
-	// uploaded icon, belongs to the shared catalog owner, so every caller's
-	// read (adult or kid) resolves against the owner, not the caller (#84).
+	// same 404 as a missing icon (AC-006). Every uploaded icon belongs to a
+	// catalog app, so every adult reads the same one (#84).
 	const notFound = "no icon for that variant"
 	if !s.serviceVisible(w, r, u, r.PathValue("id"), notFound) {
 		return
 	}
-	owner, ok := s.catalogOwner(w, r, notFound)
-	if !ok {
-		return
-	}
 
-	ic, err := s.store.GetIcon(r.Context(), r.PathValue("id"), owner, variant)
+	ic, err := s.store.GetIcon(r.Context(), r.PathValue("id"), variant)
 	if errors.Is(err, storage.ErrNotFound) {
 		http.Error(w, notFound, http.StatusNotFound)
 		return
@@ -83,29 +78,11 @@ func (s *server) handleGetIcon(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(ic.Bytes)
 }
 
-// catalogOwner resolves the shared catalog owner, whose rows every account
-// reads. With no admin yet there is no catalog, so it writes a 404 with
-// notFoundMsg; on a failed lookup it writes a 500. Either way it returns false.
-func (s *server) catalogOwner(w http.ResponseWriter, r *http.Request, notFoundMsg string) (string, bool) {
-	owner, err := s.store.SharedCatalogOwnerID(r.Context())
-	if errors.Is(err, storage.ErrNotFound) {
-		http.Error(w, notFoundMsg, http.StatusNotFound)
-		return "", false
-	}
-	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return "", false
-	}
-	return owner, true
-}
-
-// handlePutIcon stores (creates or replaces) a PNG variant on a shared catalog
-// service. Admin-only under the shared catalog model (SPEC-245-224, #224): a
-// non-admin session gets 403. The raw request body IS the PNG. Validation order:
+// handlePutIcon stores (creates or replaces) a PNG variant on a catalog
+// service. Admin-only (classCatalogWrite): a non-admin session gets 403. The raw request body IS the PNG. Validation order:
 // byte size (413) → PNG magic-byte sniff (415) → dimensions (422). 204 on success.
 func (s *server) handlePutIcon(w http.ResponseWriter, r *http.Request) {
-	owner, ok := s.requireCatalogAdmin(w, r)
-	if !ok {
+	if _, ok := s.requireAdmin(w, r); !ok {
 		return
 	}
 	variant := r.PathValue("variant")
@@ -142,7 +119,7 @@ func (s *server) handlePutIcon(w http.ResponseWriter, r *http.Request) {
 
 	sum := sha256.Sum256(body)
 	etag := hex.EncodeToString(sum[:])
-	err = s.store.PutIcon(r.Context(), r.PathValue("id"), owner, variant, body, cfg.Width, cfg.Height, etag)
+	err = s.store.PutIcon(r.Context(), r.PathValue("id"), variant, body, cfg.Width, cfg.Height, etag)
 	if errors.Is(err, storage.ErrNotFound) {
 		http.Error(w, "no such service", http.StatusNotFound)
 		return
@@ -154,12 +131,10 @@ func (s *server) handlePutIcon(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// handleDeleteIcon removes a PNG variant on a shared catalog service. Admin-only
-// under the shared catalog model (SPEC-245-224, #224): a non-admin session gets
-// 403. Idempotent for the admin: 204 whether or not bytes existed (spec A11).
+// handleDeleteIcon removes a PNG variant on a catalog service. Admin-only
+// (classCatalogWrite): a non-admin session gets 403. Idempotent for the admin: 204 whether or not bytes existed (spec A11).
 func (s *server) handleDeleteIcon(w http.ResponseWriter, r *http.Request) {
-	owner, ok := s.requireCatalogAdmin(w, r)
-	if !ok {
+	if _, ok := s.requireAdmin(w, r); !ok {
 		return
 	}
 	variant := r.PathValue("variant")
@@ -168,7 +143,7 @@ func (s *server) handleDeleteIcon(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := s.store.DeleteIcon(r.Context(), r.PathValue("id"), owner, variant)
+	err := s.store.DeleteIcon(r.Context(), r.PathValue("id"), variant)
 	if errors.Is(err, storage.ErrNotFound) {
 		http.Error(w, "no such service", http.StatusNotFound)
 		return
@@ -195,17 +170,16 @@ var (
 )
 
 // handleFetchIcon downloads the favicon from a service's own registered url and
-// stores it as the light variant (v21 §7.4). Admin-only under the shared catalog
-// model (SPEC-245-224): a non-admin gets 403. The pipeline is PNG-only, so a
+// stores it as the light variant (v21 §7.4). Admin-only (classCatalogWrite): a
+// non-admin gets 403. The pipeline is PNG-only, so a
 // non-PNG favicon (or any fetch failure) returns 422 and leaves the icon as-is.
 func (s *server) handleFetchIcon(w http.ResponseWriter, r *http.Request) {
-	owner, ok := s.requireCatalogAdmin(w, r)
-	if !ok {
+	if _, ok := s.requireAdmin(w, r); !ok {
 		return
 	}
 	id := r.PathValue("id")
 
-	rawURL, err := s.store.ServiceURL(r.Context(), id, owner)
+	rawURL, err := s.store.ServiceURL(r.Context(), id)
 	if errors.Is(err, storage.ErrNotFound) {
 		http.Error(w, "no such service", http.StatusNotFound)
 		return
@@ -241,7 +215,7 @@ func (s *server) handleFetchIcon(w http.ResponseWriter, r *http.Request) {
 
 	sum := sha256.Sum256(body)
 	etag := hex.EncodeToString(sum[:])
-	if err := s.store.PutIcon(r.Context(), id, owner, "light", body, cfg.Width, cfg.Height, etag); err != nil {
+	if err := s.store.PutIcon(r.Context(), id, "light", body, cfg.Width, cfg.Height, etag); err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
 			http.Error(w, "no such service", http.StatusNotFound)
 			return

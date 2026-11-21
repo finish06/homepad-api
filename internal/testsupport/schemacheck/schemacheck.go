@@ -16,7 +16,7 @@ import (
 
 // Validate checks doc against schema and returns every violation
 // (nil when doc conforms). It implements the subset of JSON Schema 2020-12
-// that docs/schema/homepad-backup-v1.json uses: type, const, enum, required,
+// that docs/schema/homepad-backup-v*.json use: type, const, enum, required,
 // properties, additionalProperties: false, items, pattern, minLength,
 // maxLength, minimum, maximum, maxItems and local $ref to #/$defs. Anything
 // else in the schema is reported as unsupported, so the checker can't pass a

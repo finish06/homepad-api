@@ -136,10 +136,10 @@ const (
 	// of it, so a kid is refused even if a handler forgot its admin gate.
 	classAdminOnly routeClass = "admin-only"
 	// classCatalogWrite: admin-only, enforced exactly like classAdminOnly,
-	// and the write acts on the shared catalog for every admin: the handler
-	// gets the owner from requireCatalogAdmin (SPEC-household-basics
-	// AC-023). second_admin_test.go probes every route of this class as a
-	// second admin, reading the list from here (AC-025).
+	// and the write acts on the household's catalog, which has no owner
+	// (SPEC-household-catalog-owner). second_admin_test.go probes every
+	// route of this class as a second admin, reading the list from here
+	// (SPEC-household-basics AC-025): it now guards against a regression.
 	classCatalogWrite routeClass = "catalog-write"
 )
 

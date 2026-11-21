@@ -1,0 +1,8 @@
+-- 0021_household_catalog.down.sql — there is no working down migration.
+--
+-- 0021 deletes the catalog rows nobody could see (a copy is in
+-- catalog_archive) and drops services.user_id and categories.user_id. Homepad
+-- 17.x needs both columns and can't run on this database.
+--
+-- To go back to 17.x, restore the database dump you took before upgrading to
+-- 18.0.0. The 18.0.0 entry in the CHANGELOG says how.

@@ -10,8 +10,8 @@ import (
 
 // SPEC-backup-import §7 — the storage side of backup, restore and Homepage
 // import. The planner (internal/transfer) is pure: it reads a TransferState and
-// writes through a TransferTx. Every catalog row it reads or writes is the
-// shared catalog owner's (AC-025, homepad-api#87), whichever admin runs it.
+// writes through a TransferTx. It reads and writes the household's catalog,
+// whichever admin runs it (SPEC-household-catalog-owner).
 
 // importLockKey is the advisory lock that serializes restore and import
 // applies (AC-009). Distinct from migrateLockKey and accountsLockKey
@@ -20,12 +20,10 @@ const importLockKey = 0x686f6d6570616433 // "homepad3"
 
 // TransferState is everything the planner needs to know about the install.
 type TransferState struct {
-	// OwnerID is the shared catalog owner (the first admin).
-	OwnerID string
 	// CallerID is the admin running the export, restore or import.
 	CallerID string
 	Sections []TransferSection // in sort_index order
-	Apps     []TransferApp     // the owner's services, by slug
+	Apps     []TransferApp     // the catalog's services, by slug
 	Offers   []TransferOffer   // in sort_index order
 	Settings SystemSettings
 	// People is every account, adults then kids. Loaded only when asked for.
@@ -104,7 +102,6 @@ type TransferPerson struct {
 
 // TransferLoad says what LoadTransferState reads.
 type TransferLoad struct {
-	OwnerID   string
 	CallerID  string
 	People    bool // per-person state for every account
 	IconBytes bool // icon bytes (export only)
@@ -163,9 +160,9 @@ func (s *Store) LoadTransferState(ctx context.Context, in TransferLoad) (*Transf
 }
 
 func loadTransferState(ctx context.Context, q querier, in TransferLoad) (*TransferState, error) {
-	st := &TransferState{OwnerID: in.OwnerID, CallerID: in.CallerID}
+	st := &TransferState{CallerID: in.CallerID}
 	err := collect(ctx, q, `SELECT id, name, sort_index, grid_width FROM categories
-		WHERE user_id = $1 ORDER BY sort_index, name`, []any{in.OwnerID}, func(r pgx.Rows) error {
+		ORDER BY sort_index, name`, nil, func(r pgx.Rows) error {
 		var x TransferSection
 		err := r.Scan(&x.ID, &x.Name, &x.SortIndex, &x.GridWidth)
 		st.Sections = append(st.Sections, x)
@@ -176,7 +173,7 @@ func loadTransferState(ctx context.Context, q querier, in TransferLoad) (*Transf
 	}
 	appIdx := map[string]int{}
 	err = collect(ctx, q, `SELECT id, slug, name, description, url, icon, COALESCE(gatus_key, ''), click_action,
-		category_id, source_library_id FROM services WHERE user_id = $1 ORDER BY slug`, []any{in.OwnerID}, func(r pgx.Rows) error {
+		category_id, source_library_id FROM services ORDER BY slug`, nil, func(r pgx.Rows) error {
 		var x TransferApp
 		err := r.Scan(&x.ID, &x.Slug, &x.Name, &x.Description, &x.URL, &x.Icon, &x.GatusKey, &x.ClickAction,
 			&x.SectionID, &x.SourceLibraryID)
@@ -192,8 +189,8 @@ func loadTransferState(ctx context.Context, q querier, in TransferLoad) (*Transf
 		bytesCol = `si.bytes`
 	}
 	err = collect(ctx, q, `SELECT si.service_id, si.variant, si.etag, `+bytesCol+` FROM service_icons si
-		JOIN services s ON s.id = si.service_id WHERE s.user_id = $1 ORDER BY si.service_id, si.variant DESC`,
-		[]any{in.OwnerID}, func(r pgx.Rows) error {
+		ORDER BY si.service_id, si.variant DESC`,
+		nil, func(r pgx.Rows) error {
 			var id string
 			var x TransferIcon
 			if err := r.Scan(&id, &x.Variant, &x.ETag, &x.Bytes); err != nil {
@@ -225,8 +222,8 @@ func loadTransferState(ctx context.Context, q querier, in TransferLoad) (*Transf
 	}
 	// The caller's view order is ListServices' order.
 	err = collect(ctx, q, `SELECT s.id FROM services s
-		LEFT JOIN user_layout ul ON ul.service_id = s.id AND ul.user_id = $2
-		WHERE s.user_id = $1 ORDER BY ul.sort_index NULLS LAST, s.name`, []any{in.OwnerID, in.CallerID}, func(r pgx.Rows) error {
+		LEFT JOIN user_layout ul ON ul.service_id = s.id AND ul.user_id = $1
+		ORDER BY ul.sort_index NULLS LAST, s.name`, []any{in.CallerID}, func(r pgx.Rows) error {
 		var id string
 		err := r.Scan(&id)
 		st.CallerOrder = append(st.CallerOrder, id)
@@ -250,8 +247,7 @@ func loadTransferState(ctx context.Context, q querier, in TransferLoad) (*Transf
 	return st, nil
 }
 
-// loadTransferPeople reads every account and its per-person state. Only
-// references into the shared catalog are kept.
+// loadTransferPeople reads every account and its per-person state.
 func loadTransferPeople(ctx context.Context, q querier, st *TransferState, appIdx map[string]int) error {
 	secs := map[string]bool{}
 	for _, s := range st.Sections {
@@ -376,12 +372,14 @@ func (t *TransferTx) exec1(ctx context.Context, what, sql string, args ...any) e
 	return nil
 }
 
-func (t *TransferTx) DeleteCatalog(ctx context.Context, owner string) error {
+// DeleteCatalog deletes every app and section and the App Library (Replace,
+// SPEC-household-catalog-owner AC-013).
+func (t *TransferTx) DeleteCatalog(ctx context.Context) error {
 	for _, sql := range []string{
-		`DELETE FROM services WHERE user_id = $1`,
-		`DELETE FROM categories WHERE user_id = $1`,
+		`DELETE FROM services`,
+		`DELETE FROM categories`,
 	} {
-		if _, err := t.tx.Exec(ctx, sql, owner); err != nil {
+		if _, err := t.tx.Exec(ctx, sql); err != nil {
 			return fmt.Errorf("storage: transfer delete catalog: %w", err)
 		}
 	}
@@ -391,19 +389,19 @@ func (t *TransferTx) DeleteCatalog(ctx context.Context, owner string) error {
 	return nil
 }
 
-func (t *TransferTx) CreateSection(ctx context.Context, owner, name string, sortIndex, gridWidth int) (string, error) {
+func (t *TransferTx) CreateSection(ctx context.Context, name string, sortIndex, gridWidth int) (string, error) {
 	var id string
-	err := t.tx.QueryRow(ctx, `INSERT INTO categories (user_id, name, sort_index, grid_width)
-		VALUES ($1, $2, $3, $4) RETURNING id`, owner, name, sortIndex, gridWidth).Scan(&id)
+	err := t.tx.QueryRow(ctx, `INSERT INTO categories (name, sort_index, grid_width)
+		VALUES ($1, $2, $3) RETURNING id`, name, sortIndex, gridWidth).Scan(&id)
 	if err != nil {
 		return "", fmt.Errorf("storage: transfer create section: %w", err)
 	}
 	return id, nil
 }
 
-func (t *TransferTx) UpdateSection(ctx context.Context, owner, id string, sortIndex, gridWidth int) error {
-	return t.exec1(ctx, "update section", `UPDATE categories SET sort_index = $3, grid_width = $4
-		WHERE id = $1 AND user_id = $2`, id, owner, sortIndex, gridWidth)
+func (t *TransferTx) UpdateSection(ctx context.Context, id string, sortIndex, gridWidth int) error {
+	return t.exec1(ctx, "update section", `UPDATE categories SET sort_index = $2, grid_width = $3
+		WHERE id = $1`, id, sortIndex, gridWidth)
 }
 
 func (t *TransferTx) CreateOffer(ctx context.Context, o TransferOfferRow) (string, error) {
@@ -423,36 +421,36 @@ func (t *TransferTx) UpdateOffer(ctx context.Context, id string, o TransferOffer
 		id, o.Name, o.URL, o.Icon, o.Description, o.SuggestedCategory, o.SortIndex)
 }
 
-func (t *TransferTx) CreateApp(ctx context.Context, owner string, a TransferAppRow) (string, error) {
+func (t *TransferTx) CreateApp(ctx context.Context, a TransferAppRow) (string, error) {
 	var id string
-	err := t.tx.QueryRow(ctx, `INSERT INTO services (user_id, slug, name, description, url, icon, gatus_key, click_action, category_id)
-		VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7, ''), $8, $9) RETURNING id`,
-		owner, a.Slug, a.Name, a.Description, a.URL, a.Icon, a.GatusKey, a.ClickAction, a.SectionID).Scan(&id)
+	err := t.tx.QueryRow(ctx, `INSERT INTO services (slug, name, description, url, icon, gatus_key, click_action, category_id)
+		VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), $7, $8) RETURNING id`,
+		a.Slug, a.Name, a.Description, a.URL, a.Icon, a.GatusKey, a.ClickAction, a.SectionID).Scan(&id)
 	if err != nil {
 		return "", fmt.Errorf("storage: transfer create app: %w", err)
 	}
 	return id, nil
 }
 
-func (t *TransferTx) UpdateApp(ctx context.Context, owner, id string, a TransferAppRow) error {
-	return t.exec1(ctx, "update app", `UPDATE services SET slug = $3, name = $4, description = $5, url = $6, icon = $7,
-		gatus_key = NULLIF($8, ''), click_action = $9, category_id = $10, updated_at = now()
-		WHERE id = $1 AND user_id = $2`,
-		id, owner, a.Slug, a.Name, a.Description, a.URL, a.Icon, a.GatusKey, a.ClickAction, a.SectionID)
+func (t *TransferTx) UpdateApp(ctx context.Context, id string, a TransferAppRow) error {
+	return t.exec1(ctx, "update app", `UPDATE services SET slug = $2, name = $3, description = $4, url = $5, icon = $6,
+		gatus_key = NULLIF($7, ''), click_action = $8, category_id = $9, updated_at = now()
+		WHERE id = $1`,
+		id, a.Slug, a.Name, a.Description, a.URL, a.Icon, a.GatusKey, a.ClickAction, a.SectionID)
 }
 
 // SetGatusKey fills an app's EMPTY status key, and nothing else (§4.3).
-func (t *TransferTx) SetGatusKey(ctx context.Context, owner, id, key string) error {
-	return t.exec1(ctx, "set gatus key", `UPDATE services SET gatus_key = $3, updated_at = now()
-		WHERE id = $1 AND user_id = $2 AND gatus_key IS NULL`, id, owner, key)
+func (t *TransferTx) SetGatusKey(ctx context.Context, id, key string) error {
+	return t.exec1(ctx, "set gatus key", `UPDATE services SET gatus_key = $2, updated_at = now()
+		WHERE id = $1 AND gatus_key IS NULL`, id, key)
 }
 
 // LinkLibrary re-links provenance (source_library_id) by an offer's name and
 // URL (§3).
-func (t *TransferTx) LinkLibrary(ctx context.Context, owner string, appIDs []string) error {
+func (t *TransferTx) LinkLibrary(ctx context.Context, appIDs []string) error {
 	_, err := t.tx.Exec(ctx, `UPDATE services s SET source_library_id = (
 		  SELECT la.id FROM library_apps la WHERE la.name = s.name AND la.url = s.url ORDER BY la.sort_index, la.id LIMIT 1)
-		WHERE s.user_id = $1 AND s.id::text = ANY($2::text[]) AND s.source_library_id IS NULL`, owner, appIDs)
+		WHERE s.id::text = ANY($1::text[]) AND s.source_library_id IS NULL`, appIDs)
 	if err != nil {
 		return fmt.Errorf("storage: transfer link library: %w", err)
 	}
