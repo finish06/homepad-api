@@ -130,4 +130,12 @@ func TestResetLinkCommand_Refusals(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	assert.Equal(t, 1, runResetLink(ctx, "", []string{"admin@homepad.test"}, &stdout, &stderr), "no DATABASE_URL")
 	assert.Contains(t, stderr.String(), "DATABASE_URL")
+
+	// A usage error is a usage error (exit 2) even without DATABASE_URL.
+	for _, args := range [][]string{nil, {"a@example.com", "b@example.com"}, {"  "}} {
+		var stdout, stderr bytes.Buffer
+		assert.Equal(t, 2, runResetLink(ctx, "", args, &stdout, &stderr), "args %q, no DATABASE_URL", args)
+		assert.Contains(t, stderr.String(), "usage: homepad-api reset-link <email>", "args %q", args)
+		assert.NotContains(t, stderr.String(), "DATABASE_URL", "args %q", args)
+	}
 }
