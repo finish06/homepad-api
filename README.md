@@ -224,17 +224,44 @@ clears them; two replicas each keep their own):
 | `POST /api/password-resets/lookup`, `/accept` | 30 a minute, burst 10, one bucket | |
 | `GET /api/auth/oidc/login` | 20 a minute, burst 10 | over it: 302 to `/#signin-error=too_many` |
 
-- Every route above but the OIDC one shares a process ceiling of 120 a
-  minute, which bounds bcrypt work. Over a limit: 429, `Retry-After` in whole
-  seconds, body `too many attempts`.
+- Login, register and the two accept routes run bcrypt. They share a process
+  ceiling of 120 a minute, burst 20, which bounds bcrypt work. The two lookup
+  routes run no bcrypt and don't spend it. Over a limit: 429, `Retry-After`
+  in whole seconds, body `too many attempts`.
+- The ceiling trades availability for bounded CPU. It is one bucket for
+  everyone. A few clients sending at their full per-client rate can keep it
+  empty. While they do, every password sign-in, registration and accept gets
+  429. Single sign-on and signed-in sessions keep working.
 - The client is the TCP peer. `X-Forwarded-For` counts only when the peer is
   in `HOMEPAD_TRUSTED_PROXIES` (addresses, CIDR ranges or hostnames,
   comma-separated; hostnames resolve at startup and every 5 minutes); then
   the client is the right-most entry that isn't a trusted proxy. `X-Real-IP`
   is never read. Unset, every request through one proxy shares one limit. A
   value that doesn't parse stops the API.
+- A hostname that doesn't resolve at startup is tried again every 10 seconds
+  until it resolves once. Then it follows the 5-minute refresh. Until then,
+  every client behind that proxy shares one limit. The log says so at most
+  once every 5 minutes.
+- An IPv4 client is its own address. An IPv6 client is its /64, because one
+  home or cloud host usually holds a whole /64. An IPv4-mapped IPv6 address
+  counts as IPv4.
 - The log names the limited client at most once a minute per key, and says
   `login locked for an email` without the email.
+
+The email lock. Ten wrong passwords for one email in 15 minutes lock that
+email out of password sign-in for 15 minutes. The lock refuses the right
+password too. It answers the same for an email with no account, so it never
+shows which emails exist. Anyone who knows an adult's email can lock them
+out this way, again and again. The lock touches only password sign-in. To
+get back in:
+
+- Wait 15 minutes.
+- Sign in with single sign-on, if the account uses it.
+- Ask an admin for a reset link. Setting a password with a live link clears
+  the lock at once. A dead link clears nothing.
+- Change your password on a device that is still signed in. That clears the
+  lock too.
+- Restarting the API clears every lock.
 
 Password reset links and changing your own password (SPEC-password-reset-link):
 

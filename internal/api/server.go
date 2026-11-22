@@ -63,7 +63,7 @@ type server struct {
 	maxAccounts int
 	// The sign-in limits (SPEC-signin-hardening §2.1), all per process: a
 	// bucket per client for each public sign-in route, the process ceiling
-	// the bcrypt and token routes share, and the per-email login lock.
+	// the bcrypt routes share, and the per-email login lock.
 	trusted       *TrustedProxies
 	loginLimit    *keyedLimiter
 	registerLimit *keyedLimiter
@@ -216,8 +216,8 @@ func (s *server) routes(d Deps) (http.Handler, []registeredRoute) {
 	rt := &router{s: s, mux: http.NewServeMux(), stub: d.Store == nil || d.Sessions == nil}
 
 	// SPEC-signin-hardening §2.1 — each public sign-in route has a limit per
-	// client and shares the process ceiling; login also locks an email after
-	// 10 failures (handleLogin).
+	// client, and the bcrypt ones share the process ceiling; login also locks
+	// an email after 10 failures (handleLogin).
 	rt.handle("POST /api/register", classPublic, s.limited("POST /api/register", s.registerLimit, s.handleRegister))
 	rt.handle("POST /api/login", classPublic, s.limited("POST /api/login", s.loginLimit, s.handleLogin))
 	rt.handle("POST /api/logout", classCatalogFree, s.handleLogout)
@@ -280,19 +280,20 @@ func (s *server) routes(d Deps) (http.Handler, []registeredRoute) {
 
 	// SPEC-household-basics §7 — invites. Making, listing and revoking are
 	// admin-only; the link's two routes are public and share one per-client
-	// limit and the process ceiling (SPEC-signin-hardening §2.1).
+	// limit (SPEC-signin-hardening §2.1). Only accept runs bcrypt, so only
+	// accept spends the process ceiling.
 	rt.handle("POST /api/admin/invites", classAdminOnly, s.handleCreateInvite)
 	rt.handle("GET /api/admin/invites", classAdminOnly, s.handleListInvites)
 	rt.handle("DELETE /api/admin/invites/{id}", classAdminOnly, s.handleRevokeInvite)
-	rt.handle("POST /api/invites/lookup", classPublic, s.limited("POST /api/invites/lookup", s.inviteLimit, s.handleLookupInvite))
+	rt.handle("POST /api/invites/lookup", classPublic, s.perClient("POST /api/invites/lookup", s.inviteLimit, s.handleLookupInvite))
 	rt.handle("POST /api/invites/accept", classPublic, s.limited("POST /api/invites/accept", s.inviteLimit, s.handleAcceptInvite))
 
 	// SPEC-password-reset-link §7 — reset links and changing your own
 	// password. Making a link is admin-only; the link's two routes are public
-	// and share their own per-client limit and the process ceiling
-	// (SPEC-signin-hardening §2.1).
+	// and share their own per-client limit (SPEC-signin-hardening §2.1). Only
+	// accept runs bcrypt, so only accept spends the process ceiling.
 	rt.handle("POST /api/admin/accounts/{id}/reset-link", classAdminOnly, s.handleCreateResetLink)
-	rt.handle("POST /api/password-resets/lookup", classPublic, s.limited("POST /api/password-resets/lookup", s.resetLimit, s.handleLookupReset))
+	rt.handle("POST /api/password-resets/lookup", classPublic, s.perClient("POST /api/password-resets/lookup", s.resetLimit, s.handleLookupReset))
 	rt.handle("POST /api/password-resets/accept", classPublic, s.limited("POST /api/password-resets/accept", s.resetLimit, s.handleAcceptReset))
 	rt.handle("POST /api/me/password", classKidForbidden, s.handleChangePassword)
 

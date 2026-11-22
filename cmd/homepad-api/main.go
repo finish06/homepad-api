@@ -111,7 +111,8 @@ func main() {
 	// HOMEPAD_TRUSTED_PROXIES (SPEC-signin-hardening §2.2): the proxies whose
 	// X-Forwarded-For the sign-in limits believe. Unset trusts none, so
 	// behind a proxy every client shares one limit. Junk stops the API, like
-	// HOMEPAD_MAX_ACCOUNTS. Hostnames resolve now and every 5 minutes.
+	// HOMEPAD_MAX_ACCOUNTS. Hostnames resolve now and every 5 minutes; one
+	// that hasn't resolved yet is retried every 10 seconds until it does.
 	trusted, err := api.ParseTrustedProxies(os.Getenv("HOMEPAD_TRUSTED_PROXIES"))
 	if err != nil {
 		log.Fatalf("config: %v", err)
@@ -120,7 +121,7 @@ func main() {
 		log.Printf("sign-in limits: HOMEPAD_TRUSTED_PROXIES is unset, so X-Forwarded-For is ignored; behind a proxy, every client shares one limit")
 	} else {
 		trusted.Refresh(ctx)
-		go trusted.Run(ctx, api.TrustedRefreshEvery)
+		go trusted.Run(ctx, api.TrustedRefreshEvery, api.TrustedRetryEvery)
 		log.Printf("sign-in limits: trusting X-Forwarded-For from %d HOMEPAD_TRUSTED_PROXIES entries", trusted.Size())
 	}
 

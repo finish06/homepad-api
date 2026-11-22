@@ -24,6 +24,14 @@ const trustedRefreshEvery = 5 * time.Minute
 // TrustedRefreshEvery is trustedRefreshEvery, for main.
 const TrustedRefreshEvery = trustedRefreshEvery
 
+// trustedRetryEvery is how often a hostname that has never resolved is tried
+// again. At startup the proxy container may not be up yet; until its name
+// resolves, every client behind it shares one limit.
+const trustedRetryEvery = 10 * time.Second
+
+// TrustedRetryEvery is trustedRetryEvery, for main.
+const TrustedRetryEvery = trustedRetryEvery
+
 // trustedLookupTimeout bounds one hostname lookup.
 const trustedLookupTimeout = 5 * time.Second
 
@@ -37,6 +45,9 @@ type TrustedProxies struct {
 
 	mu       sync.RWMutex
 	resolved map[string][]netip.Addr
+	// failLogged is when each hostname's failed lookup was last logged, so
+	// the short retry logs at most once per trustedRefreshEvery.
+	failLogged map[string]time.Time
 }
 
 // ParseTrustedProxies parses a comma-separated list of addresses, CIDR
@@ -50,7 +61,7 @@ func ParseTrustedProxies(raw string) (*TrustedProxies, error) {
 }
 
 func parseTrustedProxies(raw string, lookup func(context.Context, string) ([]netip.Addr, error)) (*TrustedProxies, error) {
-	tp := &TrustedProxies{lookup: lookup, resolved: map[string][]netip.Addr{}}
+	tp := &TrustedProxies{lookup: lookup, resolved: map[string][]netip.Addr{}, failLogged: map[string]time.Time{}}
 	for _, entry := range strings.Split(raw, ",") {
 		e := strings.TrimSpace(entry)
 		if e == "" {
@@ -127,7 +138,7 @@ func (tp *TrustedProxies) Refresh(ctx context.Context) {
 		addrs, err := tp.lookup(lctx, h)
 		cancel()
 		if err != nil || len(addrs) == 0 {
-			if ctx.Err() == nil {
+			if ctx.Err() == nil && tp.logFailure(h) {
 				log.Printf("trusted proxies: can't resolve %q (HOMEPAD_TRUSTED_PROXIES): %v", h, err)
 			}
 			continue
@@ -142,16 +153,46 @@ func (tp *TrustedProxies) Refresh(ctx context.Context) {
 	}
 }
 
-// Run refreshes the hostnames every interval until ctx ends.
-func (tp *TrustedProxies) Run(ctx context.Context, every time.Duration) {
+// logFailure reports whether a failed lookup of h should be logged: the
+// first time, then at most once per trustedRefreshEvery.
+func (tp *TrustedProxies) logFailure(h string) bool {
+	tp.mu.Lock()
+	defer tp.mu.Unlock()
+	now := time.Now()
+	if last, ok := tp.failLogged[h]; ok && now.Sub(last) < trustedRefreshEvery {
+		return false
+	}
+	tp.failLogged[h] = now
+	return true
+}
+
+// allResolved reports whether every hostname has resolved at least once.
+func (tp *TrustedProxies) allResolved() bool {
+	tp.mu.RLock()
+	defer tp.mu.RUnlock()
+	for _, h := range tp.hosts {
+		if _, ok := tp.resolved[h]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// Run refreshes the hostnames until ctx ends: every retry while some
+// hostname has never resolved, then every interval.
+func (tp *TrustedProxies) Run(ctx context.Context, every, retry time.Duration) {
 	if !tp.HasHostnames() {
 		return
 	}
-	t := time.NewTicker(every)
-	defer t.Stop()
 	for {
+		wait := every
+		if !tp.allResolved() {
+			wait = retry
+		}
+		t := time.NewTimer(wait)
 		select {
 		case <-ctx.Done():
+			t.Stop()
 			return
 		case <-t.C:
 			tp.Refresh(ctx)
@@ -183,11 +224,11 @@ func (tp *TrustedProxies) contains(a netip.Addr) bool {
 	return false
 }
 
-// clientAddr is the address the per-client limits key on (§2.2). It is the
+// clientAddr is the key the per-client limits use (§2.2). The client is the
 // TCP peer, unless the peer is a trusted proxy: then it is the right-most
 // X-Forwarded-For entry that isn't a trusted proxy. An entry that doesn't
 // parse stops the walk at the last trusted hop, so junk can't pick a key.
-// X-Real-IP is never read.
+// X-Real-IP is never read. The key is clientKey of that address.
 func clientAddr(r *http.Request, tp *TrustedProxies) string {
 	host := r.RemoteAddr
 	if h, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
@@ -199,7 +240,7 @@ func clientAddr(r *http.Request, tp *TrustedProxies) string {
 	}
 	peer = peer.Unmap().WithZone("")
 	if !tp.contains(peer) {
-		return peer.String()
+		return clientKey(peer)
 	}
 	var hops []string
 	for _, v := range r.Header.Values("X-Forwarded-For") {
@@ -212,11 +253,22 @@ func clientAddr(r *http.Request, tp *TrustedProxies) string {
 			break
 		}
 		if !tp.contains(a) {
-			return a.String()
+			return clientKey(a)
 		}
 		last = a
 	}
-	return last.String()
+	return clientKey(last)
+}
+
+// clientKey is the limit key for a client address. An IPv4 address is its
+// own key. An IPv6 address is keyed on its /64: one home or cloud host
+// usually holds a whole /64, and could otherwise get a fresh bucket for every
+// address in it. a is already unmapped, so IPv4-mapped IPv6 is IPv4 here.
+func clientKey(a netip.Addr) string {
+	if a.Is4() {
+		return a.String()
+	}
+	return netip.PrefixFrom(a, 64).Masked().String()
 }
 
 // parseHop reads one X-Forwarded-For entry: an address, optionally with a

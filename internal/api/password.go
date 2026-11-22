@@ -211,6 +211,11 @@ func (s *server) handleAcceptReset(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+	// The password is set. A live link proves the account, so it also lifts
+	// the email's login lock (SPEC-signin-hardening AC-005). A dead link
+	// clears nothing, so the lock still says nothing about which emails have
+	// accounts.
+	s.loginFails.clear(loginFailKey(u.Email))
 	ended, err := s.sessions.DestroyAllForUser(ctx, u.ID, "")
 	if err != nil {
 		// The password is set and the link used; say so, and fail loudly so
@@ -282,6 +287,8 @@ func (s *server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+	// The new password also lifts the email's login lock.
+	s.loginFails.clear(loginFailKey(u.Email))
 	for _, id := range revoked {
 		log.Printf("reset: link %s revoked by a password change", id)
 	}
