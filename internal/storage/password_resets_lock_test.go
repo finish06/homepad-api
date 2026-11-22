@@ -121,3 +121,49 @@ func TestPasswordReset_CreateAndAcceptRaceWithoutDeadlock(t *testing.T) {
 		}
 	}
 }
+
+// Finding 1's revoke only helps if a demoted or removed admin can't make a
+// link a moment later. A create whose request passed the admin check races
+// the demotion: the test plays SetAdultRole and RemoveAdult by hand (lock
+// the admin's row, change it, commit) while the create waits. The create
+// must then refuse (ErrNotAdmin) and leave no live link behind; for a
+// removal it must not fail on the foreign key (a 500).
+func TestCreatePasswordReset_RefusesAnAdminDemotedOrRemovedMeanwhile(t *testing.T) {
+	for name, change := range map[string]string{
+		"demoted": `UPDATE users SET role = 'user' WHERE id = $1`,
+		"removed": `DELETE FROM users WHERE id = $1`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			store, ctx := openStore(t)
+			admin := seedStoreAdmin(t, store, ctx)
+			user := seedStoreUser(t, store, ctx)
+			h := resetHash(t)
+
+			tx, err := store.Pool().Begin(ctx)
+			require.NoError(t, err)
+			defer tx.Rollback(ctx)
+			_, err = tx.Exec(ctx, `SELECT 1 FROM users WHERE id = $1 FOR UPDATE`, admin)
+			require.NoError(t, err)
+
+			done := make(chan error, 1)
+			go func() {
+				_, _, err := store.CreatePasswordReset(ctx, h, user, admin, time.Hour)
+				done <- err
+			}()
+			waitForLockWaiter(t, ctx, store)
+			_, err = tx.Exec(ctx, change, admin)
+			require.NoError(t, err)
+			require.NoError(t, tx.Commit(ctx))
+
+			select {
+			case err = <-done:
+			case <-time.After(10 * time.Second):
+				t.Fatal("create never finished")
+			}
+			assert.ErrorIs(t, err, storage.ErrNotAdmin)
+			var n int
+			require.NoError(t, store.Pool().QueryRow(ctx, `SELECT count(*) FROM password_resets WHERE token_hash = $1`, h).Scan(&n))
+			assert.Zero(t, n, "no link was made")
+		})
+	}
+}
