@@ -147,7 +147,9 @@ file without `iframeSameOrigin` leaves an existing app's value alone, and a new
 app gets `false`. Homepad 17.x refuses a version 2 file.
 Homepage `widget`, `widgets` and `providers` values are dropped while parsing
 and never stored, logged or returned. `url` and `icon` written by these routes
-are always `http(s)` or empty. Limits: a backup up to 16 MB, each Homepage file
+are always `http(s)` or empty. A restored `icon` that isn't is skipped with
+`icon_unsupported`: an existing app or offer keeps the icon it has, and a new
+one gets none. Limits: a backup up to 16 MB, each Homepage file
 up to 1 MB, at most 1,000 apps, 200 sections, 1,000 offers and 100 kids.
 
 Status widgets (SPEC-status-widgets §7):
@@ -226,8 +228,9 @@ clears them; two replicas each keep their own):
 
 - Login, register and the two accept routes run bcrypt. They share a process
   ceiling of 120 a minute, burst 20, which bounds bcrypt work. The two lookup
-  routes run no bcrypt and don't spend it. Over a limit: 429, `Retry-After`
-  in whole seconds, body `too many attempts`.
+  routes run no bcrypt and don't spend it. They share their own process
+  ceiling of 600 a minute, burst 60. Over a limit: 429, `Retry-After` in
+  whole seconds, body `too many attempts`.
 - The ceiling trades availability for bounded CPU. It is one bucket for
   everyone. A few clients sending at their full per-client rate can keep it
   empty. While they do, every password sign-in, registration and accept gets

@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -841,6 +843,8 @@ func TestResetLink_CreateByAdminDemotedMeanwhileIs403(t *testing.T) {
 	defer tx.Rollback(ctx)
 	_, err = tx.Exec(ctx, `SELECT 1 FROM users WHERE id = $1 FOR UPDATE`, env.AdminID)
 	require.NoError(t, err)
+	var holder int
+	require.NoError(t, tx.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&holder))
 
 	done := make(chan plainResponse, 1)
 	go func() {
@@ -853,11 +857,7 @@ func TestResetLink_CreateByAdminDemotedMeanwhileIs403(t *testing.T) {
 
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		var n int
-		require.NoError(t, env.Store.Pool().QueryRow(ctx,
-			`SELECT count(*) FROM pg_stat_activity
-			  WHERE datname = current_database() AND pid <> pg_backend_pid() AND wait_event_type = 'Lock'`).Scan(&n))
-		if n > 0 {
+		if waitersBlockedBy(t, env.Store.Pool(), holder) > 0 {
 			break
 		}
 		require.True(t, time.Now().Before(deadline), "the create never waited for the admin's row")
@@ -877,6 +877,60 @@ func TestResetLink_CreateByAdminDemotedMeanwhileIs403(t *testing.T) {
 	var n int
 	require.NoError(t, env.Store.Pool().QueryRow(ctx, `SELECT count(*) FROM password_resets`).Scan(&n))
 	assert.Zero(t, n, "no link was made")
+}
+
+// waitersBlockedBy counts the backends waiting on a lock that holder (a
+// backend pid) holds. Only those count: a lock wait anywhere else in the
+// database says nothing about whether the request under test is blocked.
+func waitersBlockedBy(t *testing.T, pool *pgxpool.Pool, holder int) int {
+	t.Helper()
+	var n int
+	require.NoError(t, pool.QueryRow(t.Context(),
+		`SELECT count(*) FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))`, holder).Scan(&n))
+	return n
+}
+
+// #110 review — the demoted-admin test waits until its create is blocked on
+// the admin's row. Someone else's lock wait in the same database mustn't
+// count, or the test could go on before the create is actually blocked.
+func TestWaitersBlockedBy_CountsOnlyTheHoldersWaiters(t *testing.T) {
+	env := resetEnv(t)
+	ctx := t.Context()
+	pool := env.Store.Pool()
+	begin := func() (pgx.Tx, int) {
+		tx, err := pool.Begin(ctx)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = tx.Rollback(context.Background()) })
+		var pid int
+		require.NoError(t, tx.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&pid))
+		return tx, pid
+	}
+	// Ours holds the admin's row, and nothing waits on it.
+	ours, oursPID := begin()
+	_, err := ours.Exec(ctx, `SELECT 1 FROM users WHERE id = $1 FOR UPDATE`, env.AdminID)
+	require.NoError(t, err)
+	// Someone else's lock wait: one transaction holds the user's row and a
+	// second waits on it.
+	waiter, _ := begin()
+	theirs, theirsPID := begin()
+	_, err = theirs.Exec(ctx, `SELECT 1 FROM users WHERE id = $1 FOR UPDATE`, env.UserID)
+	require.NoError(t, err)
+	waited := make(chan struct{})
+	go func() {
+		defer close(waited)
+		_, _ = waiter.Exec(ctx, `SELECT 1 FROM users WHERE id = $1 FOR UPDATE`, env.UserID)
+	}()
+
+	deadline := time.Now().Add(10 * time.Second)
+	for waitersBlockedBy(t, pool, theirsPID) == 0 {
+		require.True(t, time.Now().Before(deadline), "the second transaction never waited")
+		time.Sleep(10 * time.Millisecond)
+	}
+	assert.Zero(t, waitersBlockedBy(t, pool, oursPID), "a wait on another row counted as waiting on ours")
+	// Let the waiter through, and wait for it: a pgx connection is not
+	// safe to roll back while another goroutine uses it.
+	require.NoError(t, theirs.Rollback(ctx))
+	<-waited
 }
 
 type plainResponse struct {

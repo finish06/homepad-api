@@ -10,6 +10,7 @@ import (
 	"image/png"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -362,8 +363,8 @@ func sha(t *testing.T, b []byte) string {
 }
 
 // AC-024 — every url and icon written by restore is http(s) or empty. A bad
-// app or offer link skips that item. A bad icon value is dropped (the app
-// keeps its initials badge), with a warning.
+// app or offer link skips that item. A bad icon value skips that field, with
+// a warning: a new app gets no icon (its initials badge).
 func TestRestore_URLAllowList(t *testing.T) {
 	f := decodeFixture(t).File
 	f.Apps[0].URL = "javascript:alert(1)"
@@ -393,6 +394,61 @@ func TestRestore_URLAllowList(t *testing.T) {
 		assert.True(t, o.Icon == "" || transfer.IsHTTPURL(o.Icon), o.Icon)
 	}
 	assert.Nil(t, appBySlug(after, "grafana"))
+}
+
+// homepad#585, AC-024 — icon values that aren't http(s), like "gitea" saved
+// through the single-app routes, are in a backup of the dashboard as it is.
+// Restore can't write them, so it skips that field with a reason
+// (icon_unsupported) and leaves the app's or offer's icon alone, rather
+// than updating the item to clear it. Restoring an unchanged backup in
+// Merge mode is a no-op (AC-013). Replace deletes and recreates, and a new
+// item can't be given a non-URL icon, so there the icon is still dropped.
+func TestRestore_UnchangedBackupKeepsNonURLIcons(t *testing.T) {
+	m := newMem(freshState())
+	st := apply(t, m, restorePlan(t, freshState(), decodeFixture(t), transfer.ModeMerge))
+	appBySlug(st, "grafana").Icon = "grafana"
+	st.Offers[0].Icon = "gitea"
+	offer := st.Offers[0].Name
+	before, _ := json.Marshal(st)
+
+	backup := decodeFile(t, transfer.BuildFile(st, true, "18.0.0", time.Now()))
+	p := restorePlan(t, st, backup, transfer.ModeMerge)
+	assert.True(t, zeroChanges(p.Summary), "%+v", p.Summary)
+	a := item(t, p, transfer.KindApp, "Grafana")
+	assert.Equal(t, transfer.ActionUnchanged, a.Action)
+	assert.Equal(t, []string{transfer.WarnIconUnsupported}, a.Warnings, "the skipped field still has its reason")
+	o := item(t, p, transfer.KindOffer, offer)
+	assert.Equal(t, transfer.ActionUnchanged, o.Action)
+	assert.Equal(t, []string{transfer.WarnIconUnsupported}, o.Warnings)
+
+	after, _ := json.Marshal(apply(t, m, p))
+	assert.JSONEq(t, string(before), string(after))
+}
+
+// homepad#585 — the skipped icon doesn't hold back the item's other fields,
+// and never replaces the icon the app has now.
+func TestRestore_NonURLIconLeavesTheCurrentIcon(t *testing.T) {
+	m := newMem(freshState())
+	st := apply(t, m, restorePlan(t, freshState(), decodeFixture(t), transfer.ModeMerge))
+	cur := appBySlug(st, "jellyfin")
+	require.True(t, transfer.IsHTTPURL(cur.Icon), "the fixture's Jellyfin has a URL icon: %q", cur.Icon)
+	icon := cur.Icon
+
+	f := transfer.BuildFile(st, true, "18.0.0", time.Now())
+	for i := range f.Apps {
+		if f.Apps[i].Slug == "jellyfin" {
+			f.Apps[i].Icon = "jellyfin"
+			f.Apps[i].Description = "Films, renamed"
+		}
+	}
+	p := restorePlan(t, st, decodeFile(t, f), transfer.ModeMerge)
+	a := item(t, p, transfer.KindApp, "Jellyfin")
+	assert.Equal(t, transfer.ActionUpdate, a.Action)
+	assert.Equal(t, []string{"description"}, a.Fields)
+	assert.Equal(t, []string{transfer.WarnIconUnsupported}, a.Warnings)
+	after := apply(t, m, p)
+	assert.Equal(t, icon, appBySlug(after, "jellyfin").Icon)
+	assert.Equal(t, "Films, renamed", appBySlug(after, "jellyfin").Description)
 }
 
 // AC-007 — items the planner can't use are skipped, each with a reason.

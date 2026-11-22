@@ -23,6 +23,27 @@ jobs:
   staging-release:
     runs-on: ubuntu-latest
     steps:
+      # homepad#613 — the image's homepadVersion. ci-shared's build-push.sh
+      # passes APP_VERSION as a build arg when it is in the job env (set here
+      # through $GITHUB_ENV), and always passes GIT_SHA. The action's own
+      # checkout is shallow with no tags, so describe from a full one first.
+      # A failure here leaves APP_VERSION unset, and the Dockerfile falls back
+      # to dev-<sha>: it never fails the release.
+      - name: Full checkout, for git describe
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: APP_VERSION from git describe (e.g. 18.0.0-3-gabc1234)
+        shell: bash
+        run: |
+          v="$(git describe --tags --match 'v[0-9]*' 2>/dev/null || true)"
+          v="${v#v}"
+          if [ -n "$v" ]; then
+            echo "APP_VERSION=$v" >> "$GITHUB_ENV"
+            echo "homepadVersion: $v"
+          else
+            echo "::warning::git describe found no v* tag; the image reports dev-<sha>"
+          fi
       - uses: http://gitea-http.gitea.svc.cluster.local:3000/Code/ci-shared/staging-release@v3
         with:
           image-name: homepad-api

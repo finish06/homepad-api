@@ -46,7 +46,8 @@ type TrustedProxies struct {
 	mu       sync.RWMutex
 	resolved map[string][]netip.Addr
 	// failLogged is when each hostname's failed lookup was last logged, so
-	// the short retry logs at most once per trustedRefreshEvery.
+	// the short retry logs at most once per trustedRefreshEvery. A
+	// successful lookup clears the name's entry.
 	failLogged map[string]time.Time
 }
 
@@ -149,6 +150,9 @@ func (tp *TrustedProxies) Refresh(ctx context.Context) {
 		}
 		tp.mu.Lock()
 		tp.resolved[h] = out
+		// The outage is over: the next failure starts a new one and is
+		// logged straight away.
+		delete(tp.failLogged, h)
 		tp.mu.Unlock()
 	}
 }

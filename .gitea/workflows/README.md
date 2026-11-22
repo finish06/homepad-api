@@ -133,6 +133,10 @@ red; look for an error note in the "Dispatch QA" step instead.
 
 **What it does** (from ci-shared's `staging-release`):
 
+- First works out the version with `git describe` (for example
+  `18.0.0-3-gabc1234`: three commits after the v18.0.0 tag). The image writes
+  it into backups as `homepadVersion`. If that step finds no tag, the image
+  says `dev-<commit sha>` instead.
 - Builds the image from `main` and pushes it with two tags:
   `<short-sha>-beta` and `<short-sha>`.
 - Stops with an error if the staging cluster credentials are missing. That way

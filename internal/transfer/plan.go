@@ -532,7 +532,13 @@ func PlanRestore(st *storage.TransferState, d *Decoded, mode string) *Plan {
 		}
 		validSlugs[slug] = true
 		it := Item{Kind: KindApp, Name: name}
-		if icon != "" && !IsHTTPURL(icon) {
+		// AC-024: restore never writes an icon that isn't http(s). It skips
+		// that field, with icon_unsupported as the reason: a new app gets no
+		// icon, and a matched app keeps the one it has (below), so a backup
+		// of values saved through the single-app routes, like "gitea",
+		// restores as a no-op (homepad#585).
+		skipIcon := icon != "" && !IsHTTPURL(icon)
+		if skipIcon {
 			icon = ""
 			it.Warnings = append(it.Warnings, WarnIconUnsupported)
 		}
@@ -550,6 +556,9 @@ func PlanRestore(st *storage.TransferState, d *Decoded, mode string) *Plan {
 			GatusKey: gatus, ClickAction: click, IframeSameOrigin: a.IframeSameOrigin}
 
 		cur, exists := curBySlug[slug]
+		if skipIcon && exists {
+			row.Icon = cur.Icon
+		}
 		var iconItems []Item
 		for _, v := range []struct {
 			variant string
@@ -667,7 +676,10 @@ func PlanRestore(st *storage.TransferState, d *Decoded, mode string) *Plan {
 		}
 		seenOffer[key] = true
 		it := Item{Kind: KindOffer, Name: name}
-		if icon != "" && !IsHTTPURL(icon) {
+		// AC-024, homepad#585: as for apps, a non-http(s) icon is a skipped
+		// field. A matched offer keeps its icon; a new one gets none.
+		skipIcon := icon != "" && !IsHTTPURL(icon)
+		if skipIcon {
 			icon = ""
 			it.Warnings = append(it.Warnings, WarnIconUnsupported)
 		}
@@ -675,6 +687,9 @@ func PlanRestore(st *storage.TransferState, d *Decoded, mode string) *Plan {
 			Description: of.Description, SuggestedCategory: of.SuggestedCategory}}
 		if c, ok := curOffer[key]; ok {
 			po.cur = &c
+			if skipIcon {
+				po.row.Icon = c.Icon
+			}
 		}
 		pend = append(pend, po)
 	}

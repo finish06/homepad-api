@@ -63,7 +63,8 @@ type server struct {
 	maxAccounts int
 	// The sign-in limits (SPEC-signin-hardening §2.1), all per process: a
 	// bucket per client for each public sign-in route, the process ceiling
-	// the bcrypt routes share, and the per-email login lock.
+	// the bcrypt routes share, the one the two lookups share, and the
+	// per-email login lock.
 	trusted       *TrustedProxies
 	loginLimit    *keyedLimiter
 	registerLimit *keyedLimiter
@@ -71,6 +72,7 @@ type server struct {
 	resetLimit    *keyedLimiter
 	oidcLimit     *keyedLimiter
 	ceiling       *tokenBucket
+	lookupCeiling *tokenBucket // the invite and reset lookups only
 	loginFails    *failureLimiter
 	// passwordFails counts wrong current passwords on POST /api/me/password,
 	// per account (SPEC-password-reset-link §3.3). Per process.
@@ -128,6 +130,7 @@ func newServer(d Deps) *server {
 	s.resetLimit = newKeyedLimiter("resets", limits.Reset, time.Now)
 	s.oidcLimit = newKeyedLimiter("oidc login", limits.OIDCLogin, time.Now)
 	s.ceiling = newTokenBucket(limits.Ceiling, time.Now)
+	s.lookupCeiling = newTokenBucket(limits.LookupCeiling, time.Now)
 	s.loginFails = newFailureLimiter(time.Now, loginFailPolicy)
 	// Defaults for anything left unwired, so every server has a working
 	// widget set (the manager's loop only runs where main starts it).
@@ -281,19 +284,20 @@ func (s *server) routes(d Deps) (http.Handler, []registeredRoute) {
 	// SPEC-household-basics §7 — invites. Making, listing and revoking are
 	// admin-only; the link's two routes are public and share one per-client
 	// limit (SPEC-signin-hardening §2.1). Only accept runs bcrypt, so only
-	// accept spends the process ceiling.
+	// accept spends the process ceiling; lookup has its own, cheaper one.
 	rt.handle("POST /api/admin/invites", classAdminOnly, s.handleCreateInvite)
 	rt.handle("GET /api/admin/invites", classAdminOnly, s.handleListInvites)
 	rt.handle("DELETE /api/admin/invites/{id}", classAdminOnly, s.handleRevokeInvite)
-	rt.handle("POST /api/invites/lookup", classPublic, s.perClient("POST /api/invites/lookup", s.inviteLimit, s.handleLookupInvite))
+	rt.handle("POST /api/invites/lookup", classPublic, s.lookupLimited("POST /api/invites/lookup", s.inviteLimit, s.handleLookupInvite))
 	rt.handle("POST /api/invites/accept", classPublic, s.limited("POST /api/invites/accept", s.inviteLimit, s.handleAcceptInvite))
 
 	// SPEC-password-reset-link §7 — reset links and changing your own
 	// password. Making a link is admin-only; the link's two routes are public
 	// and share their own per-client limit (SPEC-signin-hardening §2.1). Only
-	// accept runs bcrypt, so only accept spends the process ceiling.
+	// accept runs bcrypt, so only accept spends the process ceiling; lookup
+	// shares the invite lookup's cheaper one.
 	rt.handle("POST /api/admin/accounts/{id}/reset-link", classAdminOnly, s.handleCreateResetLink)
-	rt.handle("POST /api/password-resets/lookup", classPublic, s.perClient("POST /api/password-resets/lookup", s.resetLimit, s.handleLookupReset))
+	rt.handle("POST /api/password-resets/lookup", classPublic, s.lookupLimited("POST /api/password-resets/lookup", s.resetLimit, s.handleLookupReset))
 	rt.handle("POST /api/password-resets/accept", classPublic, s.limited("POST /api/password-resets/accept", s.resetLimit, s.handleAcceptReset))
 	rt.handle("POST /api/me/password", classKidForbidden, s.handleChangePassword)
 
@@ -328,7 +332,22 @@ func (s *server) routes(d Deps) (http.Handler, []registeredRoute) {
 
 	rt.handle(livePattern, classPublic, handleLive)
 
-	return rt.mux, rt.routes
+	return refuseFraming(rt.mux), rt.routes
+}
+
+// refuseFraming sends the anti-framing headers on every response (homepad
+// #612). The web nginx adds them to what it serves, but the ingress sends
+// /api/* straight here, so the API has to send them itself. They are set
+// before the handler runs, so a handler that sets its own
+// Content-Security-Policy replaces this one rather than being overwritten;
+// none does today, and one that does must keep frame-ancestors 'none'.
+func refuseFraming(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("Content-Security-Policy", "frame-ancestors 'none'")
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (s *server) handleHealth(w http.ResponseWriter, r *http.Request) {

@@ -229,6 +229,38 @@ func TestLimits_LookupsSkipTheCeiling(t *testing.T) {
 	requireTooMany(t, code, h, body)
 }
 
+// #110 review — the lookups skip the bcrypt ceiling but still have a
+// process-wide bound of their own, shared by both lookup routes and every
+// client: many clients, each under its own limit, can't send an unbounded
+// total. Over it they get the same 429 as every other limit.
+func TestLimits_LookupsShareAProcessBound(t *testing.T) {
+	tp, err := api.ParseTrustedProxies("127.0.0.1")
+	require.NoError(t, err)
+	env := testsupport.NewEnvWith(t, testsupport.Options{
+		TrustedProxies: tp,
+		// One lookup per client before its own bucket is empty: only the
+		// process bound can refuse a fresh client.
+		Limits: api.Limits{Login: roomyClient, Invite: api.RateLimit{PerMinute: 1, Burst: 1},
+			Reset:         api.RateLimit{PerMinute: 1, Burst: 1},
+			LookupCeiling: api.RateLimit{PerMinute: 1, Burst: 3}},
+	})
+	lookup := func(path, client string) (int, http.Header, string) {
+		return postFrom(t, env.URL+path, client, map[string]string{"token": strings.Repeat("C", 43)})
+	}
+	for i, path := range []string{"/api/invites/lookup", "/api/password-resets/lookup", "/api/invites/lookup"} {
+		code, _, body := lookup(path, fmt.Sprintf("198.51.100.%d", i+1))
+		require.Equal(t, http.StatusNotFound, code, "client %d: %s", i+1, body)
+	}
+	for i, path := range []string{"/api/invites/lookup", "/api/password-resets/lookup"} {
+		code, h, body := lookup(path, fmt.Sprintf("198.51.100.%d", i+10))
+		requireTooMany(t, code, h, body)
+	}
+	// The bcrypt routes have their own ceiling: an empty lookup bound
+	// doesn't refuse a sign-in.
+	code, _, body := login(t, env, "198.51.100.20", "user@homepad.test", "not the password")
+	assert.Equal(t, http.StatusUnauthorized, code, body)
+}
+
 // AC-006 — the ceiling doesn't reach the authenticated routes.
 func TestLimits_CeilingLeavesOtherRoutesAlone(t *testing.T) {
 	env := testsupport.NewEnvWith(t, testsupport.Options{Limits: api.Limits{Ceiling: api.RateLimit{PerMinute: 1, Burst: 1}}})

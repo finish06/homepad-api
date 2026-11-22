@@ -37,10 +37,23 @@ type Limits struct {
 	Reset     RateLimit // POST /api/password-resets/lookup and /accept, one bucket
 	OIDCLogin RateLimit // GET /api/auth/oidc/login
 	Ceiling   RateLimit // process-wide: login, register and the two accept routes
+	// LookupCeiling is process-wide too, shared by the two lookup routes
+	// only (#110 review). They run no bcrypt, so they stay off Ceiling and
+	// can't starve sign-in, but many clients still can't send an unbounded
+	// total of SHA-256s and database reads.
+	LookupCeiling RateLimit
 }
 
 // DefaultLimits are the decided numbers (§2.1, Q3). The ceiling refills at
 // 120 a minute; its burst of 20 bounds a spike to about 20 bcrypt compares.
+//
+// The lookup ceiling is 600 a minute, burst 60 (#110 review). A lookup is
+// one SHA-256 and one indexed read, so 10 a second is light work even for a
+// small box. A real household opens an invite or reset link a few times a
+// day, so it never comes close; it takes 20 clients each at their own full
+// 30 a minute to fill it, so one busy client can't lock everyone out. It is
+// five times the bcrypt ceiling because a bcrypt compare is tens of
+// milliseconds of CPU and a lookup is well under one.
 var DefaultLimits = Limits{
 	Login:     RateLimit{PerMinute: 10, Burst: 10},
 	Register:  RateLimit{PerMinute: 5, Burst: 5},
@@ -48,6 +61,8 @@ var DefaultLimits = Limits{
 	Reset:     DefaultInviteLimit,
 	OIDCLogin: RateLimit{PerMinute: 20, Burst: 10},
 	Ceiling:   RateLimit{PerMinute: 120, Burst: 20},
+
+	LookupCeiling: RateLimit{PerMinute: 600, Burst: 60},
 }
 
 func (l Limits) withDefaults() Limits {
@@ -65,6 +80,8 @@ func (l Limits) withDefaults() Limits {
 		Reset:     pick(l.Reset, d.Reset),
 		OIDCLogin: pick(l.OIDCLogin, d.OIDCLogin),
 		Ceiling:   pick(l.Ceiling, d.Ceiling),
+
+		LookupCeiling: pick(l.LookupCeiling, d.LookupCeiling),
 	}
 }
 
@@ -416,21 +433,34 @@ func tooMany(w http.ResponseWriter, wait time.Duration) {
 // the process ceiling. Over either it answers tooMany and never calls h.
 // route names the route in the audit line.
 func (s *server) limited(route string, kl *keyedLimiter, h http.HandlerFunc) http.HandlerFunc {
-	return s.perClient(route, kl, func(w http.ResponseWriter, r *http.Request) {
-		if ok, wait, logIt := s.ceiling.takeLog(); !ok {
+	return s.perClient(route, kl, withCeiling(route, "the process ceiling", s.ceiling, h))
+}
+
+// lookupLimited wraps the invite and reset lookups with their per-client
+// bucket and then the lookup ceiling. They run no bcrypt (one SHA-256 and
+// one indexed read), so they don't spend the bcrypt ceiling, but their
+// total is still bounded (#110 review).
+func (s *server) lookupLimited(route string, kl *keyedLimiter, h http.HandlerFunc) http.HandlerFunc {
+	return s.perClient(route, kl, withCeiling(route, "the lookup ceiling", s.lookupCeiling, h))
+}
+
+// withCeiling spends one of a process-wide bucket's tokens before h. Over
+// it, it answers tooMany and never calls h. what names the bucket in the
+// audit line.
+func withCeiling(route, what string, b *tokenBucket, h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if ok, wait, logIt := b.takeLog(); !ok {
 			if logIt {
-				log.Printf("ratelimit: %s limited by the process ceiling", route)
+				log.Printf("ratelimit: %s limited by %s", route, what)
 			}
 			tooMany(w, wait)
 			return
 		}
 		h(w, r)
-	})
+	}
 }
 
-// perClient wraps a public route with its per-client bucket only. The
-// invite and reset lookups use it: they run no bcrypt (one SHA-256 and one
-// indexed read), so they don't spend the process ceiling.
+// perClient wraps a public route with its per-client bucket only.
 func (s *server) perClient(route string, kl *keyedLimiter, h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		client := clientAddr(r, s.trusted)

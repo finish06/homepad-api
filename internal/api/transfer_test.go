@@ -476,6 +476,34 @@ func TestTransfer_RestoreReplace(t *testing.T) {
 	assert.Equal(t, "plan_missing", decodeAs[tError](t, b).Code)
 }
 
+// homepad#585 — icons like "gitea", saved through PATCH /api/services, are in
+// the backup as they are. Merge-restoring that backup at once changes
+// nothing: the icon field is skipped with icon_unsupported, not cleared.
+func TestTransfer_UnchangedBackupKeepsNonURLIcons(t *testing.T) {
+	env := testsupport.NewEnv(t)
+	for _, slug := range []string{"gitea", "grafana"} {
+		r := doJSON(t, http.MethodPatch, env.URL+"/api/services/"+firstSlugID(t, env, slug), "admin-session", map[string]any{"icon": slug})
+		r.Body.Close()
+		require.Equal(t, http.StatusOK, r.StatusCode)
+	}
+	resp, file := getExport(t, env.URL, "admin-session", "?people=true")
+	require.Equal(t, http.StatusOK, resp.StatusCode, "%s", file)
+
+	p := previewRestore(t, env.URL, "admin-session", "merge", file)
+	assert.True(t, p.noChanges(), "%+v", p.Summary)
+	for _, it := range p.Items {
+		if it.Kind == "app" {
+			assert.Equal(t, "unchanged", it.Action, it.Name)
+			assert.Equal(t, []string{"icon_unsupported"}, it.Warnings, it.Name)
+		}
+	}
+	before := dumpDB(t, env)
+	code, b := applyRestore(t, env.URL, "admin-session", "merge", p.PlanHash, file)
+	require.Equal(t, http.StatusOK, code, "%s", b)
+	assert.Equal(t, before, dumpDB(t, env))
+	assert.Equal(t, 1, countRows(t, env, `SELECT count(*) FROM services WHERE slug = 'gitea' AND icon = 'gitea'`))
+}
+
 // AC-008 / TC-006 — a stale preview gets 409 with the new plan, and nothing
 // changes.
 func TestTransfer_StalePreviewIs409(t *testing.T) {

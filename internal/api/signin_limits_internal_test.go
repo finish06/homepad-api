@@ -1,8 +1,10 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log"
 	"net/http/httptest"
 	"net/netip"
 	"sort"
@@ -44,6 +46,11 @@ func TestDefaultLimits_AreTheSpecNumbers(t *testing.T) {
 		if got[k] != w {
 			t.Errorf("DefaultLimits %s = %+v, want %+v", k, got[k], w)
 		}
+	}
+	// #110 review — the lookups' process bound: well above every client
+	// together needs, well under what one indexed read can serve.
+	if l := DefaultLimits.LookupCeiling; l.PerMinute != 600 || l.Burst != 60 {
+		t.Errorf("lookup ceiling = %+v, want 600 a minute, burst 60", l)
 	}
 	// AC-006 — the process ceiling refills at 120 a minute.
 	if DefaultLimits.Ceiling.PerMinute != 120 {
@@ -579,5 +586,34 @@ func TestTrustedProxies_RunRetriesUntilResolved(t *testing.T) {
 	}
 	if trustedRetryEvery != 10*time.Second {
 		t.Fatalf("trustedRetryEvery = %v, want 10s", trustedRetryEvery)
+	}
+}
+
+// #110 review — a name that resolves again starts a new outage: its next
+// failure is logged straight away, not held back by the last outage's
+// throttle.
+func TestTrustedProxies_RecoveryResetsTheFailureLog(t *testing.T) {
+	var buf bytes.Buffer
+	prev := log.Writer()
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(prev) })
+
+	results := []error{errors.New("no such host"), nil, errors.New("no such host")}
+	tp, err := parseTrustedProxies("web", func(context.Context, string) ([]netip.Addr, error) {
+		e := results[0]
+		results = results[1:]
+		if e != nil {
+			return nil, e
+		}
+		return []netip.Addr{netip.MustParseAddr("172.18.0.3")}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tp.Refresh(context.Background()) // fails: logged
+	tp.Refresh(context.Background()) // resolves
+	tp.Refresh(context.Background()) // a new outage, well inside trustedRefreshEvery
+	if n := strings.Count(buf.String(), "can't resolve"); n != 2 {
+		t.Fatalf("logged %d failures, want 2 (one per outage):\n%s", n, buf.String())
 	}
 }
