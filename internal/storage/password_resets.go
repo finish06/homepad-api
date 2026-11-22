@@ -48,7 +48,13 @@ type PasswordReset struct {
 // revokes the account's earlier live links (Q6) and returns their ids. The
 // account row is locked first, so racing creates leave one live link.
 // ErrNotFound when userID is not an adult (unknown, malformed, a kid);
-// ErrSSOAccount when the adult has no local password.
+// ErrSSOAccount when the adult has no local password; ErrNotAdmin when
+// createdBy is no longer an admin.
+//
+// Before that, the maker's row is share-locked and their role re-read: a
+// demotion or removal holds that row while it revokes the links they made,
+// so a create that passed the request's admin check a moment earlier waits
+// for it and then refuses, instead of leaving them a fresh live link.
 func (s *Store) CreatePasswordReset(ctx context.Context, tokenHash []byte, userID, createdBy string, ttl time.Duration) (PasswordReset, []string, error) {
 	var link PasswordReset
 	var revoked []string
@@ -57,6 +63,19 @@ func (s *Store) CreatePasswordReset(ctx context.Context, tokenHash []byte, userI
 		return link, nil, err
 	}
 	defer tx.Rollback(ctx)
+
+	if createdBy != "" {
+		var role string
+		err := tx.QueryRow(ctx, `SELECT role FROM users WHERE id = $1 FOR KEY SHARE`, createdBy).Scan(&role)
+		switch {
+		case errors.Is(err, pgx.ErrNoRows) || isInvalidText(err):
+			return link, nil, ErrNotAdmin
+		case err != nil:
+			return link, nil, err
+		case role != "admin":
+			return link, nil, ErrNotAdmin
+		}
+	}
 
 	u, err := scanUser(tx.QueryRow(ctx, `SELECT `+userColumns+` FROM users WHERE id = $1 FOR NO KEY UPDATE`, userID))
 	switch {

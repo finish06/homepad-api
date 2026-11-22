@@ -74,6 +74,10 @@ func (s *server) handleCreateResetLink(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, storage.ErrSSOAccount):
 		writeJSON(w, http.StatusConflict, passwordError{"sso_account"})
 		return
+	case errors.Is(err, storage.ErrNotAdmin):
+		// Demoted or removed by another admin after this request's check.
+		http.Error(w, "admin role required", http.StatusForbidden)
+		return
 	case err != nil:
 		log.Printf("reset: create: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
