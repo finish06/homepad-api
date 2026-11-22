@@ -8,7 +8,6 @@ import (
 	"log"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -38,14 +37,16 @@ const deadReset = "reset link not found"
 
 // Change password's guard against a borrowed, signed-in device (§3.3):
 // passwordFailMax wrong current passwords within passwordFailWindow lock the
-// route for that account for passwordLockFor.
+// route for that account for passwordLockFor. The wrong-password audit line
+// is throttled to one a minute per account (limiterLogEvery).
 const (
 	passwordFailMax    = 5
 	passwordFailWindow = 15 * time.Minute
 	passwordLockFor    = 15 * time.Minute
-	// passwordLogEvery throttles the wrong-password audit line per account.
-	passwordLogEvery = time.Minute
 )
+
+// passwordFailPolicy is that guard as a failureLimiter policy.
+var passwordFailPolicy = failurePolicy{max: passwordFailMax, window: passwordFailWindow, lockFor: passwordLockFor}
 
 // passwordError is the {"error": code} body of the refusals the web app tells
 // apart: self, sso_account, wrong_password.
@@ -301,78 +302,6 @@ func (s *server) passwordMatches(u storage.User, password string) bool {
 		return false
 	}
 	return compare([]byte(u.PasswordHash), []byte(password)) == nil
-}
-
-// failureLimiter counts wrong current passwords per account (§3.3). It is
-// per process, like the invite bucket.
-type failureLimiter struct {
-	mu    sync.Mutex
-	now   func() time.Time
-	byKey map[string]*failures
-}
-
-type failures struct {
-	at          []time.Time // wrong tries inside the window, oldest first
-	lockedUntil time.Time
-	loggedAt    time.Time
-}
-
-func newFailureLimiter(now func() time.Time) *failureLimiter {
-	if now == nil {
-		now = time.Now
-	}
-	return &failureLimiter{now: now, byKey: map[string]*failures{}}
-}
-
-// locked returns how long key is still locked out, or 0.
-func (l *failureLimiter) locked(key string) time.Duration {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	f := l.byKey[key]
-	if f == nil {
-		return 0
-	}
-	if wait := f.lockedUntil.Sub(l.now()); wait > 0 {
-		return wait
-	}
-	return 0
-}
-
-// fail records one wrong try for key, locking it at passwordFailMax inside
-// the window. It reports whether this try should be logged (at most one line
-// per passwordLogEvery).
-func (l *failureLimiter) fail(key string) (logIt bool) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	now := l.now()
-	f := l.byKey[key]
-	if f == nil {
-		f = &failures{}
-		l.byKey[key] = f
-	}
-	kept := f.at[:0]
-	for _, t := range f.at {
-		if now.Sub(t) < passwordFailWindow {
-			kept = append(kept, t)
-		}
-	}
-	f.at = append(kept, now)
-	if len(f.at) >= passwordFailMax {
-		f.lockedUntil = now.Add(passwordLockFor)
-		f.at = nil
-	}
-	if f.loggedAt.IsZero() || now.Sub(f.loggedAt) >= passwordLogEvery {
-		f.loggedAt = now
-		return true
-	}
-	return false
-}
-
-// clear forgets key's wrong tries after a right one.
-func (l *failureLimiter) clear(key string) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	delete(l.byKey, key)
 }
 
 // ResetLinkCommand is `homepad-api reset-link <email>` (Q5, AC-016): it makes

@@ -2,7 +2,6 @@ package api_test
 
 import (
 	"context"
-	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -16,7 +15,9 @@ import (
 // email, and creates an account from the email claim. Both now require the
 // identity provider to say the email is verified (email_verified == true).
 // An unverified or missing claim links nothing, creates nothing and starts no
-// session.
+// session. Shipped in 17.1.0; SPEC-signin-hardening AC-001 keeps it as a
+// regression guard, and AC-002 moves the refusal from a 403 text page to the
+// sign-in screen's email_unverified message.
 
 func TestOIDCCallback_EmailVerified(t *testing.T) {
 	const email = "victim@example.com"
@@ -56,8 +57,8 @@ func TestOIDCCallback_EmailVerified(t *testing.T) {
 				assert.Equal(t, "admin", role, "a verified email links the existing account")
 				return
 			}
-			code := runOIDCLoginStatus(t, homepad, idp)
-			assert.Equal(t, http.StatusForbidden, code, "an unverified email must not sign in as %s", existing.Email)
+			code := signinError(t, oidcCallback(t, homepad, idp))
+			assert.Equal(t, "email_unverified", code, "an unverified email must not sign in as %s", existing.Email)
 			n, err := store.CountUsers(ctx)
 			require.NoError(t, err)
 			assert.Equal(t, 1, n, "nothing created")
@@ -75,8 +76,8 @@ func TestOIDCCallback_EmailVerified(t *testing.T) {
 				assert.Equal(t, "newcomer@example.com", gotEmail)
 				return
 			}
-			code := runOIDCLoginStatus(t, homepad, idp)
-			assert.Equal(t, http.StatusForbidden, code)
+			code := signinError(t, oidcCallback(t, homepad, idp))
+			assert.Equal(t, "email_unverified", code)
 			_, err := store.UserByEmail(ctx, "newcomer@example.com")
 			assert.Error(t, err, "no account is created from an unverified email")
 		})
@@ -99,7 +100,7 @@ func TestOIDCCallback_UserinfoEmailNeedsItsOwnVerification(t *testing.T) {
 				assert.Equal(t, "fromuserinfo@example.com", gotEmail)
 				return
 			}
-			assert.Equal(t, http.StatusForbidden, runOIDCLoginStatus(t, homepad, idp))
+			assert.Equal(t, "email_unverified", signinError(t, oidcCallback(t, homepad, idp)))
 			_, err := store.UserByEmail(context.Background(), "fromuserinfo@example.com")
 			assert.Error(t, err)
 		})
@@ -115,7 +116,7 @@ func TestOIDCCallback_UserinfoVerificationMustMatchEmail(t *testing.T) {
 	homepad, store := testsupport.NewOIDCServer(t, idp.config(""))
 	// Userinfo vouches for a different address than the token's.
 	idp.uiEmail = "other@example.com"
-	assert.Equal(t, http.StatusForbidden, runOIDCLoginStatus(t, homepad, idp))
+	assert.Equal(t, "email_unverified", signinError(t, oidcCallback(t, homepad, idp)))
 	_, err := store.UserByEmail(context.Background(), "token@example.com")
 	assert.Error(t, err)
 }

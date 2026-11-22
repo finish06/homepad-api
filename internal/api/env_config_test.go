@@ -32,6 +32,7 @@ var wantEnvConfigKeys = []string{
 	"COOKIE_SECURE",
 	"HOMEPAD_REGISTRATION",
 	"HOMEPAD_MAX_ACCOUNTS",
+	"HOMEPAD_TRUSTED_PROXIES", // SPEC-signin-hardening AC-017
 	"PORT",
 	"OIDC_ENABLED",
 	"OIDC_ISSUER",
@@ -39,6 +40,7 @@ var wantEnvConfigKeys = []string{
 	"OIDC_REDIRECT_URL",
 	"OIDC_CLIENT_ID",
 	"OIDC_ADMIN_GROUP",
+	"OIDC_MEMBER_GROUP", // SPEC-signin-hardening AC-013
 }
 
 func getEnvConfig(t *testing.T, baseURL, token string) (*http.Response, string) {

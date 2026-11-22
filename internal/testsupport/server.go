@@ -58,13 +58,15 @@ func NewOIDCServerWith(t *testing.T, cfg oidc.Config, opts Options) (*httptest.S
 		registration = *opts.Registration
 	}
 	h := api.New(api.Deps{
-		Store:        store,
-		Poller:       poller,
-		Sessions:     session.NewPgStore(store.Pool()),
-		Registration: registration,
-		OIDC:         cfg,
-		MaxAccounts:  opts.MaxAccounts,
-		InviteLimit:  opts.InviteLimit,
+		Store:          store,
+		Poller:         poller,
+		Sessions:       session.NewPgStore(store.Pool()),
+		Registration:   registration,
+		OIDC:           cfg,
+		MaxAccounts:    opts.MaxAccounts,
+		InviteLimit:    opts.InviteLimit,
+		Limits:         opts.Limits,
+		TrustedProxies: opts.TrustedProxies,
 	})
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
@@ -286,6 +288,11 @@ type Options struct {
 	MaxAccounts int
 	// InviteLimit overrides the public invite routes' rate limit.
 	InviteLimit api.RateLimit
+	// Limits overrides the sign-in limits (SPEC-signin-hardening §2.1); a
+	// zero field is that route's default.
+	Limits api.Limits
+	// TrustedProxies is HOMEPAD_TRUSTED_PROXIES, parsed; nil trusts none.
+	TrustedProxies *api.TrustedProxies
 	// Empty skips every seed: a fresh install with no accounts at all.
 	Empty bool
 	// Widgets configures the status-widget wiring (SPEC-status-widgets).
@@ -327,12 +334,14 @@ func newServerWith(t *testing.T, gatusURL string, opts Options) *Env {
 		registration = *opts.Registration
 	}
 	deps := api.Deps{
-		Store:        store,
-		Poller:       gatus.NewPoller(gatus.NewClient(gatusURL), time.Hour),
-		Sessions:     sessions,
-		Registration: registration,
-		MaxAccounts:  opts.MaxAccounts,
-		InviteLimit:  opts.InviteLimit,
+		Store:          store,
+		Poller:         gatus.NewPoller(gatus.NewClient(gatusURL), time.Hour),
+		Sessions:       sessions,
+		Registration:   registration,
+		MaxAccounts:    opts.MaxAccounts,
+		InviteLimit:    opts.InviteLimit,
+		Limits:         opts.Limits,
+		TrustedProxies: opts.TrustedProxies,
 	}
 	if opts.Empty {
 		deps = withWidgets(t, deps, store, opts.Widgets)

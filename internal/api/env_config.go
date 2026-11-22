@@ -28,6 +28,7 @@ var allowlistedEnvVars = []string{
 	"COOKIE_SECURE",
 	"HOMEPAD_REGISTRATION",
 	"HOMEPAD_MAX_ACCOUNTS",
+	"HOMEPAD_TRUSTED_PROXIES",
 	"PORT",
 	"OIDC_ENABLED",
 	"OIDC_ISSUER",
@@ -35,6 +36,7 @@ var allowlistedEnvVars = []string{
 	"OIDC_REDIRECT_URL",
 	"OIDC_CLIENT_ID",
 	"OIDC_ADMIN_GROUP",
+	"OIDC_MEMBER_GROUP",
 }
 
 // handleAdminEnvConfig serves the allowlisted runtime config to admins. It reads

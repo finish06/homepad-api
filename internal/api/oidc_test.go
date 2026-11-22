@@ -238,20 +238,6 @@ func runOIDCLogin(t *testing.T, homepad *httptest.Server, idp *mockIdP) *http.Co
 	return nil
 }
 
-// runOIDCLoginStatus drives the round-trip and returns the callback's status,
-// for flows that are meant to be refused.
-func runOIDCLoginStatus(t *testing.T, homepad *httptest.Server, idp *mockIdP) int {
-	t.Helper()
-	cbResp := oidcCallback(t, homepad, idp)
-	cbResp.Body.Close()
-	for _, c := range cbResp.Cookies() {
-		if c.Name == "homepad_session" && c.MaxAge >= 0 && c.Value != "" {
-			t.Errorf("a refused callback (status %d) must not set a session cookie", cbResp.StatusCode)
-		}
-	}
-	return cbResp.StatusCode
-}
-
 // oidcCallback runs login → IdP authorize → callback and returns the
 // callback's raw response.
 func oidcCallback(t *testing.T, homepad *httptest.Server, idp *mockIdP) *http.Response {

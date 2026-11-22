@@ -58,13 +58,23 @@ func (s *server) baseSessionCookie(value string, maxAge int) *http.Cookie {
 // COOKIE_SECURE for every sign-in path. On failure it has written a 500 and
 // returns false.
 func (s *server) startSession(w http.ResponseWriter, r *http.Request, u storage.User) bool {
+	if err := s.beginSession(w, r, u); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return false
+	}
+	return true
+}
+
+// beginSession is startSession without the error page: on failure it has
+// logged and written nothing, so the OIDC callback can land the browser on
+// the sign-in screen instead (SPEC-signin-hardening AC-002).
+func (s *server) beginSession(w http.ResponseWriter, r *http.Request, u storage.User) error {
 	ctx := r.Context()
 	lifetime := session.Lifetime(u.Role)
 	token, _, err := s.sessions.Create(ctx, u.ID, lifetime, r.UserAgent())
 	if err != nil {
 		log.Printf("session: create for user %s: %v", u.ID, err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return false
+		return err
 	}
 	if old, err := r.Cookie(sessionCookie); err == nil && old.Value != "" && old.Value != token {
 		if err := s.sessions.Destroy(ctx, old.Value); err != nil {
@@ -73,5 +83,5 @@ func (s *server) startSession(w http.ResponseWriter, r *http.Request, u storage.
 		}
 	}
 	http.SetCookie(w, s.sessionCookie(token, lifetime))
-	return true
+	return nil
 }

@@ -192,8 +192,8 @@ POST   /api/invites/accept                      {token, email, password, name?} 
   only its SHA-256 is stored (migration `0019`). Every dead token (unknown,
   malformed, expired, used, revoked) gets the same 404 at lookup and accept.
   Accept takes its role from the invite; any other field is a 400.
-- Lookup and accept share one in-process rate limit: 30 a minute, burst 10,
-  then 429 with `Retry-After`.
+- Lookup and accept share one per-client limit: 30 a minute, burst 10, then
+  429 with `Retry-After` (see Sign-in limits below).
 - `HOMEPAD_MAX_ACCOUNTS` caps all accounts plus pending invites (unset or `0`:
   no limit; anything else that isn't a whole number stops the API). At the
   cap, kid create, invite create, `open` register and OIDC auto-create answer
@@ -204,6 +204,37 @@ POST   /api/invites/accept                      {token, email, password, name?} 
   `second_admin_test.go` probes each one as a second admin.
 - OIDC links or creates an account by email only when the provider's
   `email_verified` claim is true (#89).
+- Under `invite_only`, OIDC creates an account only for a new identity in
+  `OIDC_ADMIN_GROUP` (admin) or `OIDC_MEMBER_GROUP` (member); an empty
+  install only through the admin group. An identity whose verified email
+  matches an existing adult always signs in. Under `open`, anyone else is a
+  member, as before.
+- Every OIDC callback failure, and the start route's own limit, redirect to
+  `/#signin-error=<code>`: `email_unverified`, `not_invited`,
+  `account_limit`, `sso_failed` or `too_many`. None renders a text page.
+
+Sign-in limits (SPEC-signin-hardening), in memory and per process (a restart
+clears them; two replicas each keep their own):
+
+| Route | Per client | Also |
+|---|---|---|
+| `POST /api/login` | 10 a minute, burst 10 | 10 failures for one email in 15 minutes lock it for 15 minutes, right password or not |
+| `POST /api/register` | 5 a minute, burst 5 | |
+| `POST /api/invites/lookup`, `/accept` | 30 a minute, burst 10, one bucket | |
+| `POST /api/password-resets/lookup`, `/accept` | 30 a minute, burst 10, one bucket | |
+| `GET /api/auth/oidc/login` | 20 a minute, burst 10 | over it: 302 to `/#signin-error=too_many` |
+
+- Every route above but the OIDC one shares a process ceiling of 120 a
+  minute, which bounds bcrypt work. Over a limit: 429, `Retry-After` in whole
+  seconds, body `too many attempts`.
+- The client is the TCP peer. `X-Forwarded-For` counts only when the peer is
+  in `HOMEPAD_TRUSTED_PROXIES` (addresses, CIDR ranges or hostnames,
+  comma-separated; hostnames resolve at startup and every 5 minutes); then
+  the client is the right-most entry that isn't a trusted proxy. `X-Real-IP`
+  is never read. Unset, every request through one proxy shares one limit. A
+  value that doesn't parse stops the API.
+- The log names the limited client at most once a minute per key, and says
+  `login locked for an email` without the email.
 
 Password reset links and changing your own password (SPEC-password-reset-link):
 
@@ -221,7 +252,7 @@ POST   /api/me/password                         {currentPassword, newPassword} â
   once, only its SHA-256 stored (migration `0022`), one 404 for every dead
   link. Making a link changes nothing until it is used.
 - Accept sets the password, ends every session of that account, and signs
-  this device in. Lookup and accept share the invite routes' rate limit.
+  this device in. Lookup and accept share their own per-client limit.
 - Change password ends every other session of the account and keeps this
   one. Five wrong current passwords in 15 minutes lock it for that account
   for 15 minutes (429 with `Retry-After`).
