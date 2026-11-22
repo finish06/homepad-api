@@ -88,9 +88,10 @@ func revokeResetsMadeBy(ctx context.Context, tx pgx.Tx, id string) (int64, error
 
 // RemoveAdult deletes the adult targetID on behalf of the admin actorID and
 // returns the removed row, how many of their pending invites it revoked (Q3)
-// and how many live reset links they made it revoked. Their sessions, favorites, order, folded sections and preferences go
-// by FK cascade; invites they made or used keep their rows, with the id SET
-// NULL. The catalog has no owner, so nothing in it changes
+// and how many live reset links they made it revoked. Their sessions,
+// favorites, order, folded sections and preferences go by FK cascade;
+// invites they made or used keep their rows, with the id SET NULL. The
+// catalog has no owner, so nothing in it changes
 // (SPEC-household-catalog-owner). Errors: ErrNotFound, ErrSelf,
 // ErrLastAdmin, ErrNotAdmin.
 func (s *Store) RemoveAdult(ctx context.Context, actorID, targetID string) (removed User, revokedInvites, revokedResets int64, err error) {
@@ -128,8 +129,9 @@ func (s *Store) RemoveAdult(ctx context.Context, actorID, targetID string) (remo
 // of the admin actorID. It returns the row as it was before, and whether the
 // role changed: setting the role an adult already has changes nothing.
 // Demoting an admin also revokes the live reset links they made, and returns
-// how many. Errors: ErrBadRole, ErrNotFound, ErrSelf, ErrLastAdmin, ErrNotAdmin. The
-// caller ends the target's sessions when changed is true (Q2).
+// how many. Errors: ErrBadRole, ErrNotFound, ErrSelf, ErrLastAdmin,
+// ErrNotAdmin. The caller ends the target's sessions when changed is true
+// (Q2).
 func (s *Store) SetAdultRole(ctx context.Context, actorID, targetID, role string) (old User, changed bool, revokedResets int64, err error) {
 	if role != "admin" && role != "user" {
 		return User{}, false, 0, ErrBadRole
