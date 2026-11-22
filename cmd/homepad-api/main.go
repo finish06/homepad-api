@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -236,12 +237,14 @@ func envOr(key, def string) string {
 // dsn and prints a one-time /#reset= path for that adult (AC-016). The token
 // goes to stdout only; the audit line goes to the log, with cli as the actor.
 func runResetLink(ctx context.Context, dsn string, args []string, stdout, stderr io.Writer) int {
+	// Arguments first, so a usage error exits 2 with or without DATABASE_URL.
+	// ResetLinkCommand prints the usage and needs no store for it.
+	if len(args) != 1 || strings.TrimSpace(args[0]) == "" {
+		return api.ResetLinkCommand(ctx, nil, args, stdout, stderr)
+	}
 	if dsn == "" {
 		fmt.Fprintln(stderr, "DATABASE_URL is unset. Run this where the API runs: docker compose exec api /homepad-api reset-link <email>")
 		return 1
-	}
-	if len(args) != 1 {
-		return api.ResetLinkCommand(ctx, nil, args, stdout, stderr)
 	}
 	store, err := storage.Open(ctx, dsn)
 	if err != nil {

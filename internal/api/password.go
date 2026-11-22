@@ -223,7 +223,7 @@ func (s *server) handleAcceptReset(w http.ResponseWriter, r *http.Request) {
 
 // handleChangePassword — POST /api/me/password {currentPassword,
 // newPassword} → 204 (AC-013). Every other session of the account ends; this
-// one stays (Q3). 403 wrong_password changes nothing and signs nobody out;
+// one stays (Q3). A live reset link for the account is revoked. 403 wrong_password changes nothing and signs nobody out;
 // 409 sso_account; 400 for the rules; 429 after passwordFailMax wrong
 // current passwords (§3.3). A kid never gets here (classKidForbidden).
 func (s *server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
@@ -271,10 +271,14 @@ func (s *server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	if err := s.store.SetPasswordHash(ctx, u.ID, string(pw)); err != nil {
+	revoked, err := s.store.SetPasswordHash(ctx, u.ID, string(pw))
+	if err != nil {
 		log.Printf("password: set for user %s: %v", u.ID, err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
+	}
+	for _, id := range revoked {
+		log.Printf("reset: link %s revoked by a password change", id)
 	}
 	keep := ""
 	if ck, err := r.Cookie(sessionCookie); err == nil {

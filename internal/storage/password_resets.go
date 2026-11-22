@@ -122,6 +122,13 @@ func (s *Store) LookupPasswordReset(ctx context.Context, tokenHash []byte) (Pass
 // sets the account's password hash and marks the link used (§3.1). Both rows
 // are locked, so racing accepts use it once. ErrNotFound when the link isn't
 // live or its account no longer has a local password; nothing changes then.
+//
+// Lock order: the account row, then the link, as in CreatePasswordReset and
+// SetPasswordHash. Taking them the other way round deadlocks against a new
+// link made at the same moment (SQLSTATE 40P01, PR #107 review). So the
+// account is found without a lock, locked, and the link is then re-read
+// under its lock: a newer link or a password change may have revoked it
+// while this waited.
 func (s *Store) UsePasswordReset(ctx context.Context, tokenHash []byte, passwordHash string) (User, PasswordReset, error) {
 	var link PasswordReset
 	tx, err := s.pool.Begin(ctx)
@@ -130,18 +137,28 @@ func (s *Store) UsePasswordReset(ctx context.Context, tokenHash []byte, password
 	}
 	defer tx.Rollback(ctx)
 
+	var userID string
 	err = tx.QueryRow(ctx,
-		`SELECT p.id::text, p.user_id::text, p.expires_at FROM password_resets p
-		  WHERE p.token_hash = $1 AND `+liveReset+` FOR UPDATE`, tokenHash,
-	).Scan(&link.ID, &link.UserID, &link.ExpiresAt)
+		`SELECT p.user_id::text FROM password_resets p WHERE p.token_hash = $1 AND `+liveReset, tokenHash,
+	).Scan(&userID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, PasswordReset{}, ErrNotFound
 	}
 	if err != nil {
 		return User{}, PasswordReset{}, err
 	}
-	u, err := scanUser(tx.QueryRow(ctx, `SELECT `+userColumns+` FROM users WHERE id = $1 FOR NO KEY UPDATE`, link.UserID))
+	u, err := scanUser(tx.QueryRow(ctx, `SELECT `+userColumns+` FROM users WHERE id = $1 FOR NO KEY UPDATE`, userID))
 	if errors.Is(err, pgx.ErrNoRows) {
+		return User{}, PasswordReset{}, ErrNotFound
+	}
+	if err != nil {
+		return User{}, PasswordReset{}, err
+	}
+	err = tx.QueryRow(ctx,
+		`SELECT p.id::text, p.user_id::text, p.expires_at FROM password_resets p
+		  WHERE p.token_hash = $1 AND p.user_id = $2 AND `+liveReset+` FOR UPDATE`, tokenHash, u.ID,
+	).Scan(&link.ID, &link.UserID, &link.ExpiresAt)
+	if errors.Is(err, pgx.ErrNoRows) { // used or revoked while this waited
 		return User{}, PasswordReset{}, ErrNotFound
 	}
 	if err != nil {
@@ -165,20 +182,41 @@ func (s *Store) UsePasswordReset(ctx context.Context, tokenHash []byte, password
 }
 
 // SetPasswordHash replaces an adult's password hash (Change password,
-// AC-013). ErrNotFound when userID names no adult.
-func (s *Store) SetPasswordHash(ctx context.Context, userID, passwordHash string) error {
-	tag, err := s.pool.Exec(ctx,
+// AC-013) and, in the same transaction, revokes the account's live reset
+// links, returning their ids: whoever holds one must not be able to replace
+// the password just chosen (PR #107 review). The account row is locked
+// first, as in CreatePasswordReset. ErrNotFound when userID names no adult.
+func (s *Store) SetPasswordHash(ctx context.Context, userID, passwordHash string) ([]string, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	tag, err := tx.Exec(ctx,
 		`UPDATE users SET password_hash = $2 WHERE id = $1 AND role IN ('admin', 'user')`, userID, passwordHash)
 	if isInvalidText(err) {
-		return ErrNotFound
+		return nil, ErrNotFound
 	}
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if tag.RowsAffected() == 0 {
-		return ErrNotFound
+		return nil, ErrNotFound
 	}
-	return nil
+	rows, err := tx.Query(ctx,
+		`UPDATE password_resets p SET revoked_at = now() WHERE p.user_id = $1 AND `+liveReset+` RETURNING p.id::text`, userID)
+	if err != nil {
+		return nil, err
+	}
+	revoked, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return revoked, nil
 }
 
 // DeleteStalePasswordResets deletes links that expired, were used or were

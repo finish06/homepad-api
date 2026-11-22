@@ -73,14 +73,27 @@ func checkStillAdmin(ctx context.Context, tx pgx.Tx, actorID string, losesAdmin 
 	return nil
 }
 
+// revokeResetsMadeBy revokes the live password reset links the adult id made
+// and returns how many. A removed or demoted admin can no longer make a link,
+// so they must not keep one either: holding the token would let them take
+// over the account it is for (PR #107 review).
+func revokeResetsMadeBy(ctx context.Context, tx pgx.Tx, id string) (int64, error) {
+	tag, err := tx.Exec(ctx,
+		`UPDATE password_resets p SET revoked_at = now() WHERE p.created_by = $1 AND `+liveReset, id)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
 // RemoveAdult deletes the adult targetID on behalf of the admin actorID and
-// returns the removed row and how many of their pending invites it revoked
-// (Q3). Their sessions, favorites, order, folded sections and preferences go
+// returns the removed row, how many of their pending invites it revoked (Q3)
+// and how many live reset links they made it revoked. Their sessions, favorites, order, folded sections and preferences go
 // by FK cascade; invites they made or used keep their rows, with the id SET
 // NULL. The catalog has no owner, so nothing in it changes
 // (SPEC-household-catalog-owner). Errors: ErrNotFound, ErrSelf,
 // ErrLastAdmin, ErrNotAdmin.
-func (s *Store) RemoveAdult(ctx context.Context, actorID, targetID string) (removed User, revokedInvites int64, err error) {
+func (s *Store) RemoveAdult(ctx context.Context, actorID, targetID string) (removed User, revokedInvites, revokedResets int64, err error) {
 	err = s.withAccountLock(ctx, func(tx pgx.Tx) error {
 		target, err := lockedTarget(ctx, tx, actorID, targetID)
 		if err != nil {
@@ -94,26 +107,32 @@ func (s *Store) RemoveAdult(ctx context.Context, actorID, targetID string) (remo
 		if err != nil {
 			return err
 		}
+		// Before the DELETE: it sets created_by to NULL (ON DELETE SET NULL).
+		resets, err := revokeResetsMadeBy(ctx, tx, target.ID)
+		if err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx, `DELETE FROM users WHERE id = $1`, target.ID); err != nil {
 			return err
 		}
-		removed, revokedInvites = target, tag.RowsAffected()
+		removed, revokedInvites, revokedResets = target, tag.RowsAffected(), resets
 		return nil
 	})
 	if err != nil {
-		return User{}, 0, err
+		return User{}, 0, 0, err
 	}
-	return removed, revokedInvites, nil
+	return removed, revokedInvites, revokedResets, nil
 }
 
 // SetAdultRole sets the adult targetID's role to "admin" or "user" on behalf
 // of the admin actorID. It returns the row as it was before, and whether the
 // role changed: setting the role an adult already has changes nothing.
-// Errors: ErrBadRole, ErrNotFound, ErrSelf, ErrLastAdmin, ErrNotAdmin. The
+// Demoting an admin also revokes the live reset links they made, and returns
+// how many. Errors: ErrBadRole, ErrNotFound, ErrSelf, ErrLastAdmin, ErrNotAdmin. The
 // caller ends the target's sessions when changed is true (Q2).
-func (s *Store) SetAdultRole(ctx context.Context, actorID, targetID, role string) (old User, changed bool, err error) {
+func (s *Store) SetAdultRole(ctx context.Context, actorID, targetID, role string) (old User, changed bool, revokedResets int64, err error) {
 	if role != "admin" && role != "user" {
-		return User{}, false, ErrBadRole
+		return User{}, false, 0, ErrBadRole
 	}
 	err = s.withAccountLock(ctx, func(tx pgx.Tx) error {
 		target, err := lockedTarget(ctx, tx, actorID, targetID)
@@ -130,11 +149,16 @@ func (s *Store) SetAdultRole(ctx context.Context, actorID, targetID, role string
 		if _, err := tx.Exec(ctx, `UPDATE users SET role = $2 WHERE id = $1`, target.ID, role); err != nil {
 			return err
 		}
+		if target.Role == "admin" {
+			if revokedResets, err = revokeResetsMadeBy(ctx, tx, target.ID); err != nil {
+				return err
+			}
+		}
 		old, changed = target, true
 		return nil
 	})
 	if err != nil {
-		return User{}, false, err
+		return User{}, false, 0, err
 	}
-	return old, changed, nil
+	return old, changed, revokedResets, nil
 }
