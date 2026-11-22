@@ -32,3 +32,8 @@ jobs:
           NATS_PUBLISH_URL:   ${{ secrets.NATS_PUBLISH_URL }}
           NATS_PUBLISH_TOKEN: ${{ secrets.NATS_PUBLISH_TOKEN }}
           QA_TRIGGER_TOKEN:   ${{ secrets.QA_TRIGGER_TOKEN }}
+          # The composite's docs-only auto-approve step (as ci-docs-approver)
+          # reads its credential from THIS env block; it can't read the secret
+          # itself (homepad#616, run 6969: empty token, warn, no approval). Map
+          # it so docs-only PRs, which skip QA, still get their approval.
+          DOCS_APPROVER_TOKEN: ${{ secrets.DOCS_APPROVER_TOKEN }}
