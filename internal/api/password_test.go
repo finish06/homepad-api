@@ -681,3 +681,101 @@ func TestResetLink_ConcurrentCreatesLeaveOneLiveLink(t *testing.T) {
 		env.UserID).Scan(&live))
 	assert.Equal(t, 1, live)
 }
+
+// liveResetCount counts the live links of account userID.
+func liveResetCount(t *testing.T, env *testsupport.Env, userID string) int {
+	t.Helper()
+	var n int
+	require.NoError(t, env.Store.Pool().QueryRow(t.Context(),
+		`SELECT count(*) FROM password_resets WHERE user_id = $1 AND used_at IS NULL AND revoked_at IS NULL AND expires_at > now()`,
+		userID).Scan(&n))
+	return n
+}
+
+// PR #107 review — removing an admin revokes the live reset links they made,
+// as it revokes their pending invites (SPEC-household-manage-adults Q3).
+// Otherwise the removed admin could still use a link they kept to take over
+// the account it was made for. Other admins' links stay live.
+func TestResetLink_RemovingAnAdminRevokesTheLinksTheyMade(t *testing.T) {
+	logs := captureLog(t)
+	env := resetEnv(t)
+	alex, alexTok := addAdmin(t, env, "alex@homepad.test")
+	other := seedOtherAdmin(t, env)
+
+	code, theirs, b := createResetLink(t, env, alexTok, env.UserID)
+	require.Equal(t, http.StatusCreated, code, string(b))
+	mine := mustResetLink(t, env, other)
+
+	code, b = removeAdult(t, env, "admin-session", alex)
+	require.Equal(t, http.StatusNoContent, code, string(b))
+
+	code, _ = lookupReset(t, env, theirs.Token)
+	assert.Equal(t, http.StatusNotFound, code, "the removed admin's link is dead")
+	r, _ := acceptReset(t, env, map[string]any{"token": theirs.Token, "password": newPassword})
+	assert.Equal(t, http.StatusNotFound, r.StatusCode)
+	assert.Equal(t, http.StatusOK, loginStatus(t, env, "user@homepad.test", userPassword), "the password is unchanged")
+
+	code, _ = lookupReset(t, env, mine.Token)
+	assert.Equal(t, http.StatusOK, code, "another admin's link stays live")
+	assert.Contains(t, logs.String(), fmt.Sprintf("reset: revoked 1 live reset links made by removed adult %s", alex))
+}
+
+// PR #107 review — demoting an admin revokes the live reset links they made:
+// a member can't make one, so a demoted admin must not keep one either.
+// Promoting a member, or a role that doesn't change, revokes nothing.
+func TestResetLink_DemotingAnAdminRevokesTheLinksTheyMade(t *testing.T) {
+	logs := captureLog(t)
+	env := resetEnv(t)
+	alex, alexTok := addAdmin(t, env, "alex@homepad.test")
+	other := seedOtherAdmin(t, env)
+
+	code, theirs, b := createResetLink(t, env, alexTok, env.UserID)
+	require.Equal(t, http.StatusCreated, code, string(b))
+	mine := mustResetLink(t, env, other)
+
+	// A no-op (already an admin) revokes nothing.
+	code, b = patchRole(t, env, "admin-session", alex, map[string]any{"role": "admin"})
+	require.Equal(t, http.StatusOK, code, string(b))
+	require.Equal(t, 1, liveResetCount(t, env, env.UserID), "a no-op keeps the link")
+
+	code, b = patchRole(t, env, "admin-session", alex, map[string]any{"role": "user"})
+	require.Equal(t, http.StatusOK, code, string(b))
+
+	code, _ = lookupReset(t, env, theirs.Token)
+	assert.Equal(t, http.StatusNotFound, code, "the demoted admin's link is dead")
+	r, _ := acceptReset(t, env, map[string]any{"token": theirs.Token, "password": newPassword})
+	assert.Equal(t, http.StatusNotFound, r.StatusCode)
+	code, _ = lookupReset(t, env, mine.Token)
+	assert.Equal(t, http.StatusOK, code, "another admin's link stays live")
+	assert.Contains(t, logs.String(), fmt.Sprintf("reset: revoked 1 live reset links made by demoted admin %s", alex))
+
+	// Promoting them back revokes nothing.
+	code, b = patchRole(t, env, "admin-session", alex, map[string]any{"role": "admin"})
+	require.Equal(t, http.StatusOK, code, string(b))
+	assert.Equal(t, 1, liveResetCount(t, env, other), "a promotion keeps other links")
+	assert.Equal(t, 1, strings.Count(logs.String(), "live reset links made by"), "only the demotion logged a revoke")
+}
+
+// PR #107 review — changing your password revokes your live reset link in
+// the same step, so whoever holds that link can't replace the password you
+// just chose. Another account's link stays live.
+func TestChangePassword_RevokesTheLiveResetLink(t *testing.T) {
+	logs := captureLog(t)
+	env := resetEnv(t)
+	other := seedOtherAdmin(t, env)
+	link := mustResetLink(t, env, env.UserID)
+	theirs := mustResetLink(t, env, other)
+
+	code, _, b := changePassword(t, env, "session-one", map[string]any{"currentPassword": userPassword, "newPassword": newPassword})
+	require.Equal(t, http.StatusNoContent, code, string(b))
+
+	code, _ = lookupReset(t, env, link.Token)
+	assert.Equal(t, http.StatusNotFound, code, "the account's link is dead")
+	r, _ := acceptReset(t, env, map[string]any{"token": link.Token, "password": "the attacker's password"})
+	assert.Equal(t, http.StatusNotFound, r.StatusCode)
+	assert.Equal(t, http.StatusOK, loginStatus(t, env, "user@homepad.test", newPassword), "the new password stands")
+
+	code, _ = lookupReset(t, env, theirs.Token)
+	assert.Equal(t, http.StatusOK, code, "another account's link stays live")
+	assert.Contains(t, logs.String(), fmt.Sprintf("reset: link %s revoked by a password change", link.ID))
+}

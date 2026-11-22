@@ -72,7 +72,7 @@ func TestRemoveAdult_DeletesAndRevokesTheirPendingInvites(t *testing.T) {
 	mkInvite(t, ctx, store, alex, "Sam")
 	mine := mkInvite(t, ctx, store, caleb, "Lee")
 
-	removed, revoked, err := store.RemoveAdult(ctx, caleb, alex)
+	removed, revoked, _, err := store.RemoveAdult(ctx, caleb, alex)
 	require.NoError(t, err)
 	assert.Equal(t, alex, removed.ID)
 	assert.Equal(t, "admin", removed.Role, "the removed row is returned for the audit line")
@@ -87,7 +87,7 @@ func TestRemoveAdult_DeletesAndRevokesTheirPendingInvites(t *testing.T) {
 	assert.Equal(t, mine.ID, pending[0].ID)
 
 	// A member can be removed too (Q5), and has no invites to revoke.
-	_, revoked, err = store.RemoveAdult(ctx, caleb, jo)
+	_, revoked, _, err = store.RemoveAdult(ctx, caleb, jo)
 	require.NoError(t, err)
 	assert.Zero(t, revoked)
 }
@@ -105,7 +105,7 @@ func TestRemoveAdult_UsedInviteKeepsItsHistory(t *testing.T) {
 	pat, _, err := store.AcceptInvite(ctx, h[:], "pat@adults.test", "x", "")
 	require.NoError(t, err)
 
-	_, revoked, err := store.RemoveAdult(ctx, caleb, alex)
+	_, revoked, _, err := store.RemoveAdult(ctx, caleb, alex)
 	require.NoError(t, err)
 	assert.Zero(t, revoked, "a used invite is not pending, so it is not revoked")
 
@@ -131,19 +131,19 @@ func TestAdults_NotFoundAndSelf(t *testing.T) {
 	require.NoError(t, err)
 
 	for _, id := range []string{kid.ID, "00000000-0000-0000-0000-0000000000ff", "not-a-uuid", ""} {
-		_, _, err := store.RemoveAdult(ctx, caleb, id)
+		_, _, _, err := store.RemoveAdult(ctx, caleb, id)
 		assert.True(t, errors.Is(err, storage.ErrNotFound), "RemoveAdult(%q) = %v", id, err)
-		_, _, err = store.SetAdultRole(ctx, caleb, id, "user")
+		_, _, _, err = store.SetAdultRole(ctx, caleb, id, "user")
 		assert.True(t, errors.Is(err, storage.ErrNotFound), "SetAdultRole(%q) = %v", id, err)
 	}
 	_, err = store.KidByID(ctx, kid.ID)
 	assert.NoError(t, err, "the kid is untouched")
 
-	_, _, err = store.RemoveAdult(ctx, caleb, caleb)
+	_, _, _, err = store.RemoveAdult(ctx, caleb, caleb)
 	assert.True(t, errors.Is(err, storage.ErrSelf), "RemoveAdult(self) = %v", err)
-	_, _, err = store.SetAdultRole(ctx, caleb, caleb, "user")
+	_, _, _, err = store.SetAdultRole(ctx, caleb, caleb, "user")
 	assert.True(t, errors.Is(err, storage.ErrSelf), "SetAdultRole(self) = %v", err)
-	_, _, err = store.SetAdultRole(ctx, caleb, caleb, "admin")
+	_, _, _, err = store.SetAdultRole(ctx, caleb, caleb, "admin")
 	assert.True(t, errors.Is(err, storage.ErrSelf), "SetAdultRole(self, same role) = %v", err)
 	assert.Equal(t, "admin", roleOf(t, ctx, store, caleb))
 }
@@ -155,24 +155,24 @@ func TestSetAdultRole_ChangesAndNoOp(t *testing.T) {
 	caleb := mkAdult(t, ctx, store, "caleb@adults.test", "admin")
 	jo := mkAdult(t, ctx, store, "jo@adults.test", "user")
 
-	old, changed, err := store.SetAdultRole(ctx, caleb, jo, "admin")
+	old, changed, _, err := store.SetAdultRole(ctx, caleb, jo, "admin")
 	require.NoError(t, err)
 	assert.True(t, changed)
 	assert.Equal(t, "user", old.Role, "the old row is returned for the audit line")
 	assert.Equal(t, "admin", roleOf(t, ctx, store, jo))
 
-	old, changed, err = store.SetAdultRole(ctx, caleb, jo, "admin")
+	old, changed, _, err = store.SetAdultRole(ctx, caleb, jo, "admin")
 	require.NoError(t, err)
 	assert.False(t, changed, "setting the role it already has changes nothing")
 	assert.Equal(t, "admin", old.Role)
 
-	_, changed, err = store.SetAdultRole(ctx, caleb, jo, "user")
+	_, changed, _, err = store.SetAdultRole(ctx, caleb, jo, "user")
 	require.NoError(t, err)
 	assert.True(t, changed)
 	assert.Equal(t, "user", roleOf(t, ctx, store, jo))
 
 	for _, bad := range []string{"kid", "", "Admin", "owner"} {
-		_, _, err = store.SetAdultRole(ctx, caleb, jo, bad)
+		_, _, _, err = store.SetAdultRole(ctx, caleb, jo, bad)
 		assert.True(t, errors.Is(err, storage.ErrBadRole), "SetAdultRole(%q) = %v", bad, err)
 	}
 	assert.Equal(t, "user", roleOf(t, ctx, store, jo))
@@ -186,12 +186,12 @@ func TestAdults_LastAdminIsRefused(t *testing.T) {
 	caleb := mkAdult(t, ctx, store, "caleb@adults.test", "admin")
 	alex := mkAdult(t, ctx, store, "alex@adults.test", "admin")
 
-	_, _, err := store.SetAdultRole(ctx, caleb, alex, "user")
+	_, _, _, err := store.SetAdultRole(ctx, caleb, alex, "user")
 	require.NoError(t, err)
 	// Alex, a member now, still holds a request that passed its admin check.
-	_, _, err = store.SetAdultRole(ctx, alex, caleb, "user")
+	_, _, _, err = store.SetAdultRole(ctx, alex, caleb, "user")
 	assert.True(t, errors.Is(err, storage.ErrLastAdmin), "demoting the last admin = %v", err)
-	_, _, err = store.RemoveAdult(ctx, alex, caleb)
+	_, _, _, err = store.RemoveAdult(ctx, alex, caleb)
 	assert.True(t, errors.Is(err, storage.ErrLastAdmin), "removing the last admin = %v", err)
 	assert.Equal(t, "admin", roleOf(t, ctx, store, caleb), "nothing changed")
 	assert.Equal(t, 1, countAdmins(t, ctx, store))
@@ -205,11 +205,11 @@ func TestAdults_ActorMustStillBeAdminInsideTheLock(t *testing.T) {
 	alex := mkAdult(t, ctx, store, "alex@adults.test", "admin")
 	jo := mkAdult(t, ctx, store, "jo@adults.test", "user")
 
-	_, _, err := store.SetAdultRole(ctx, caleb, alex, "user")
+	_, _, _, err := store.SetAdultRole(ctx, caleb, alex, "user")
 	require.NoError(t, err)
-	_, _, err = store.RemoveAdult(ctx, alex, jo)
+	_, _, _, err = store.RemoveAdult(ctx, alex, jo)
 	assert.True(t, errors.Is(err, storage.ErrNotAdmin), "a demoted actor's removal = %v", err)
-	_, _, err = store.SetAdultRole(ctx, alex, jo, "admin")
+	_, _, _, err = store.SetAdultRole(ctx, alex, jo, "admin")
 	assert.True(t, errors.Is(err, storage.ErrNotAdmin), "a demoted actor's promotion = %v", err)
 	assert.Equal(t, "user", roleOf(t, ctx, store, jo))
 	_, err = store.UserByID(ctx, jo)
@@ -234,9 +234,9 @@ func TestAdults_OppositeDemotionsRace(t *testing.T) {
 				defer wg.Done()
 				<-start
 				if round%2 == 0 {
-					_, _, errs[i] = store.SetAdultRole(ctx, actor, target, "user")
+					_, _, _, errs[i] = store.SetAdultRole(ctx, actor, target, "user")
 				} else {
-					_, _, errs[i] = store.RemoveAdult(ctx, actor, target)
+					_, _, _, errs[i] = store.RemoveAdult(ctx, actor, target)
 				}
 			}(i, pair[0], pair[1])
 		}
@@ -272,4 +272,49 @@ func TestAdults_OppositeDemotionsRace(t *testing.T) {
 		_, err := store.Pool().Exec(ctx, `UPDATE users SET role = 'admin' WHERE id = ANY($1::uuid[])`, []string{a, b})
 		require.NoError(t, err)
 	}
+}
+
+// PR #107 review — removing an admin, or demoting one, revokes the live reset
+// links they made, in the same transaction, and reports how many. Links made
+// by someone else, and used ones, are untouched; a promotion revokes nothing.
+func TestAdults_RevokeTheResetLinksTheyMade(t *testing.T) {
+	ctx, store := adultsStore(t, "homepad_adults_resets_test")
+	caleb := mkAdult(t, ctx, store, "caleb@adults.test", "admin")
+	alex := mkAdult(t, ctx, store, "alex@adults.test", "admin")
+	sam := mkAdult(t, ctx, store, "sam@adults.test", "admin")
+	jo := mkAdult(t, ctx, store, "jo@adults.test", "user")
+	lee := mkAdult(t, ctx, store, "lee@adults.test", "user")
+
+	link := func(target, by string) storage.PasswordReset {
+		t.Helper()
+		l, _, err := store.CreatePasswordReset(ctx, resetHash(t), target, by, time.Hour)
+		require.NoError(t, err)
+		return l
+	}
+	live := func(id string) bool {
+		t.Helper()
+		var ok bool
+		require.NoError(t, store.Pool().QueryRow(ctx,
+			`SELECT used_at IS NULL AND revoked_at IS NULL FROM password_resets WHERE id = $1`, id).Scan(&ok))
+		return ok
+	}
+
+	byAlex, byCaleb := link(jo, alex), link(lee, caleb)
+	_, _, revoked, err := store.SetAdultRole(ctx, caleb, jo, "admin")
+	require.NoError(t, err)
+	assert.Zero(t, revoked, "a promotion revokes nothing")
+	_, _, revoked, err = store.SetAdultRole(ctx, caleb, alex, "user")
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), revoked)
+	assert.False(t, live(byAlex.ID), "the demoted admin's link is revoked")
+	assert.True(t, live(byCaleb.ID), "another admin's link stays live")
+
+	bySam := link(lee, sam) // revokes Caleb's earlier link for Lee (Q6)
+	_, _, revoked, err = store.RemoveAdult(ctx, caleb, sam)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), revoked)
+	assert.False(t, live(bySam.ID), "the removed admin's link is revoked")
+	var createdBy *string
+	require.NoError(t, store.Pool().QueryRow(ctx, `SELECT created_by::text FROM password_resets WHERE id = $1`, bySam.ID).Scan(&createdBy))
+	assert.Nil(t, createdBy, "the row stays for the audit trail, created_by SET NULL")
 }

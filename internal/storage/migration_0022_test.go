@@ -165,15 +165,33 @@ func TestStore_PasswordResetName(t *testing.T) {
 // Change password writes only an adult's row.
 func TestStore_SetPasswordHash(t *testing.T) {
 	store, ctx := openStore(t)
+	admin := seedStoreAdmin(t, store, ctx)
 	user := seedStoreUser(t, store, ctx)
-	require.NoError(t, store.SetPasswordHash(ctx, user, "$2a$04$changed"))
+	other := seedStoreUser(t, store, ctx)
+	link, _, err := store.CreatePasswordReset(ctx, resetHash(t), user, admin, time.Hour)
+	require.NoError(t, err)
+	theirs, _, err := store.CreatePasswordReset(ctx, resetHash(t), other, admin, time.Hour)
+	require.NoError(t, err)
+
+	revoked, err := store.SetPasswordHash(ctx, user, "$2a$04$changed")
+	require.NoError(t, err)
+	assert.Equal(t, []string{link.ID}, revoked, "the account's live link is revoked with the change")
 	var got string
 	require.NoError(t, store.Pool().QueryRow(ctx, `SELECT password_hash FROM users WHERE id = $1`, user).Scan(&got))
 	assert.Equal(t, "$2a$04$changed", got)
+	var theirsLive bool
+	require.NoError(t, store.Pool().QueryRow(ctx,
+		`SELECT revoked_at IS NULL FROM password_resets WHERE id = $1`, theirs.ID).Scan(&theirsLive))
+	assert.True(t, theirsLive, "another account's link stays live")
+
+	revoked, err = store.SetPasswordHash(ctx, user, "$2a$04$again")
+	require.NoError(t, err)
+	assert.Empty(t, revoked, "nothing left to revoke")
 
 	kid, err := store.CreateKid(ctx, fmt.Sprintf("Kid %d", time.Now().UnixNano()), "blue")
 	require.NoError(t, err)
 	for name, id := range map[string]string{"kid": kid.ID, "unknown": "00000000-0000-0000-0000-000000000000", "malformed": "nope"} {
-		assert.ErrorIs(t, store.SetPasswordHash(ctx, id, "$2a$04$x"), storage.ErrNotFound, name)
+		_, err := store.SetPasswordHash(ctx, id, "$2a$04$x")
+		assert.ErrorIs(t, err, storage.ErrNotFound, name)
 	}
 }

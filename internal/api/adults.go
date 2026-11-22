@@ -60,13 +60,16 @@ func (s *server) handlePatchAdult(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	old, changed, err := s.store.SetAdultRole(ctx, admin.ID, r.PathValue("id"), *in.Role)
+	old, changed, revokedResets, err := s.store.SetAdultRole(ctx, admin.ID, r.PathValue("id"), *in.Role)
 	if err != nil {
 		s.refuseAdultChange(w, admin, patchAdultRoute, err)
 		return
 	}
 	if changed {
 		log.Printf("accounts: admin %s changed role of %s from %s to %s", admin.ID, old.ID, old.Role, *in.Role)
+		if revokedResets > 0 {
+			log.Printf("reset: revoked %d live reset links made by demoted admin %s", revokedResets, old.ID)
+		}
 		if _, err := s.sessions.DestroyAllForUser(ctx, old.ID, ""); err != nil {
 			// The role is changed and read on every request, so the old
 			// sessions already act with the new role; say so loudly anyway.
@@ -87,13 +90,14 @@ func (s *server) handlePatchAdult(w http.ResponseWriter, r *http.Request) {
 
 // handleRemoveAdult — DELETE /api/admin/accounts/{id} → 204 (AC-001). Their
 // sessions end with the row (FK cascade, AC-007) and their pending invites are
-// revoked (Q3, AC-004). The shared catalog is untouched.
+// revoked (Q3, AC-004), and so are the live reset links they made. The shared
+// catalog is untouched.
 func (s *server) handleRemoveAdult(w http.ResponseWriter, r *http.Request) {
 	admin, ok := s.requireAdmin(w, r)
 	if !ok {
 		return
 	}
-	removed, revoked, err := s.store.RemoveAdult(r.Context(), admin.ID, r.PathValue("id"))
+	removed, revoked, revokedResets, err := s.store.RemoveAdult(r.Context(), admin.ID, r.PathValue("id"))
 	if err != nil {
 		s.refuseAdultChange(w, admin, removeAdultRoute, err)
 		return
@@ -101,6 +105,9 @@ func (s *server) handleRemoveAdult(w http.ResponseWriter, r *http.Request) {
 	log.Printf("accounts: admin %s removed adult %s role=%s", admin.ID, removed.ID, removed.Role)
 	if revoked > 0 {
 		log.Printf("invite: revoked %d pending invites made by removed adult %s", revoked, removed.ID)
+	}
+	if revokedResets > 0 {
+		log.Printf("reset: revoked %d live reset links made by removed adult %s", revokedResets, removed.ID)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
