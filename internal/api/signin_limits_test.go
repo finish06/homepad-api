@@ -186,9 +186,7 @@ func TestLimits_ProcessCeilingIsShared(t *testing.T) {
 	}{
 		{"/api/login", map[string]string{"email": "alice@example.com", "password": "not the password"}},
 		{"/api/register", map[string]string{"email": "c@example.com", "password": "a long enough password"}},
-		{"/api/invites/lookup", map[string]string{"token": strings.Repeat("A", 43)}},
 		{"/api/invites/accept", map[string]string{"token": strings.Repeat("A", 43), "password": "a long enough password"}},
-		{"/api/password-resets/lookup", map[string]string{"token": strings.Repeat("A", 43)}},
 		{"/api/password-resets/accept", map[string]string{"token": strings.Repeat("A", 43), "password": "a long enough password"}},
 	}
 	for _, rt := range routes {
@@ -201,13 +199,34 @@ func TestLimits_ProcessCeilingIsShared(t *testing.T) {
 			// Two other bcrypt routes spend the ceiling…
 			code, _, _ := login(t, env, "", "user@homepad.test", "not the password")
 			require.Equal(t, http.StatusUnauthorized, code)
-			code, _, _ = postFrom(t, env.URL+"/api/invites/lookup", "", map[string]string{"token": strings.Repeat("B", 43)})
+			code, _, _ = postFrom(t, env.URL+"/api/password-resets/accept", "", map[string]string{"token": strings.Repeat("B", 43), "password": "a long enough password"})
 			require.Equal(t, http.StatusNotFound, code)
 			// …so this one is refused.
 			code, h, body := postFrom(t, env.URL+rt.path, "", rt.body)
 			requireTooMany(t, code, h, body)
 		})
 	}
+}
+
+// #109 review — the two lookup routes run no bcrypt (one SHA-256 and one
+// indexed read), so they don't spend the ceiling and aren't refused by it.
+// Their per-client limit still holds.
+func TestLimits_LookupsSkipTheCeiling(t *testing.T) {
+	env := testsupport.NewEnvWith(t, testsupport.Options{
+		InviteLimit: roomyLimit,
+		Limits: api.Limits{Login: roomyClient, Invite: roomyClient, Reset: roomyClient,
+			Ceiling: api.RateLimit{PerMinute: 1, Burst: 1}},
+	})
+	code, _, _ := login(t, env, "", "user@homepad.test", "not the password")
+	require.Equal(t, http.StatusUnauthorized, code, "the login spends the only token")
+	for _, path := range []string{"/api/invites/lookup", "/api/password-resets/lookup"} {
+		for i := 0; i < 3; i++ {
+			code, _, body := postFrom(t, env.URL+path, "", map[string]string{"token": strings.Repeat("C", 43)})
+			assert.Equal(t, http.StatusNotFound, code, "%s try %d: %s", path, i+1, body)
+		}
+	}
+	code, h, body := login(t, env, "", "user@homepad.test", "not the password")
+	requireTooMany(t, code, h, body)
 }
 
 // AC-006 — the ceiling doesn't reach the authenticated routes.

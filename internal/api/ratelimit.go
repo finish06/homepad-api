@@ -25,9 +25,10 @@ type RateLimit struct {
 var DefaultInviteLimit = RateLimit{PerMinute: 30, Burst: 10}
 
 // Limits are the sign-in limits (SPEC-signin-hardening §2.1). Each per-client
-// limit is a bucket per client address (clientAddr); Ceiling is one bucket
-// for the whole process, shared by the routes that run bcrypt or look up a
-// token, so their CPU cost is bounded whatever the client keys are. A zero
+// limit is a bucket per client key (clientAddr); Ceiling is one bucket for
+// the whole process, shared by the routes that run bcrypt, so their CPU cost
+// is bounded whatever the client keys are. The cost is availability: a few
+// busy clients can empty it, and then every password sign-in waits. A zero
 // field is its DefaultLimits value.
 type Limits struct {
 	Login     RateLimit // POST /api/login
@@ -35,7 +36,7 @@ type Limits struct {
 	Invite    RateLimit // POST /api/invites/lookup and /accept, one bucket
 	Reset     RateLimit // POST /api/password-resets/lookup and /accept, one bucket
 	OIDCLogin RateLimit // GET /api/auth/oidc/login
-	Ceiling   RateLimit // process-wide, every route above but OIDCLogin
+	Ceiling   RateLimit // process-wide: login, register and the two accept routes
 }
 
 // DefaultLimits are the decided numbers (§2.1, Q3). The ceiling refills at
@@ -411,22 +412,31 @@ func tooMany(w http.ResponseWriter, wait time.Duration) {
 	http.Error(w, "too many attempts", http.StatusTooManyRequests)
 }
 
-// limited wraps a public route with its per-client bucket and then the
-// process ceiling. Over either it answers tooMany and never calls h. route
-// names the route in the audit line.
+// limited wraps a public bcrypt route with its per-client bucket and then
+// the process ceiling. Over either it answers tooMany and never calls h.
+// route names the route in the audit line.
 func (s *server) limited(route string, kl *keyedLimiter, h http.HandlerFunc) http.HandlerFunc {
+	return s.perClient(route, kl, func(w http.ResponseWriter, r *http.Request) {
+		if ok, wait, logIt := s.ceiling.takeLog(); !ok {
+			if logIt {
+				log.Printf("ratelimit: %s limited by the process ceiling", route)
+			}
+			tooMany(w, wait)
+			return
+		}
+		h(w, r)
+	})
+}
+
+// perClient wraps a public route with its per-client bucket only. The
+// invite and reset lookups use it: they run no bcrypt (one SHA-256 and one
+// indexed read), so they don't spend the process ceiling.
+func (s *server) perClient(route string, kl *keyedLimiter, h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		client := clientAddr(r, s.trusted)
 		if ok, wait, logIt := kl.takeLog(client); !ok {
 			if logIt {
 				log.Printf("ratelimit: %s limited client=%s", route, client)
-			}
-			tooMany(w, wait)
-			return
-		}
-		if ok, wait, logIt := s.ceiling.takeLog(); !ok {
-			if logIt {
-				log.Printf("ratelimit: %s limited by the process ceiling", route)
 			}
 			tooMany(w, wait)
 			return

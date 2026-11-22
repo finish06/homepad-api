@@ -323,7 +323,7 @@ func TestClientAddr_UnsetIgnoresHeaders(t *testing.T) {
 	if got := clientOf(t, nil, "172.18.0.3:51234", "198.51.100.7"); got != "172.18.0.3" {
 		t.Errorf("nil proxies: client = %q, want the peer", got)
 	}
-	if got := clientOf(t, tp, "[2001:db8::5]:443"); got != "2001:db8::5" {
+	if got := clientOf(t, tp, "[2001:db8::5]:443"); got != "2001:db8::/64" {
 		t.Errorf("IPv6 peer = %q", got)
 	}
 	if got := clientOf(t, tp, "[::ffff:10.0.0.4]:443"); got != "10.0.0.4" {
@@ -350,7 +350,7 @@ func TestClientAddr_TrustedPeer(t *testing.T) {
 		{"only trusted hops", "172.18.0.3:5000", []string{"10.0.0.1"}, "10.0.0.1"},
 		{"garbage right-most", "172.18.0.3:5000", []string{"198.51.100.7, not-an-ip"}, "172.18.0.3"},
 		{"entry with a port", "172.18.0.3:5000", []string{"198.51.100.7:4711"}, "198.51.100.7"},
-		{"bracketed IPv6", "172.18.0.3:5000", []string{"[2001:db8::7]:4711"}, "2001:db8::7"},
+		{"bracketed IPv6", "172.18.0.3:5000", []string{"[2001:db8::7]:4711"}, "2001:db8::/64"},
 		{"untrusted peer ignores header", "203.0.113.5:5000", []string{"198.51.100.7"}, "203.0.113.5"},
 	}
 	for _, c := range cases {
@@ -432,7 +432,7 @@ func TestTrustedProxies_RunRefreshesUntilDone(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
-	go func() { tp.Run(ctx, time.Millisecond); close(done) }()
+	go func() { tp.Run(ctx, time.Millisecond, time.Millisecond); close(done) }()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		mu.Lock()
@@ -491,5 +491,93 @@ func TestLogin_TimingMediansMatch(t *testing.T) {
 	if float64(hi-lo)/float64(hi) >= 0.20 {
 		t.Fatalf("median unknown=%v wrong-password=%v differ by %.0f%%, want under 20%%",
 			unknown, wrong, 100*float64(hi-lo)/float64(hi))
+	}
+}
+
+// #109 review — an IPv6 client is keyed on its /64, so rotating addresses
+// inside one /64 can't buy a fresh bucket. IPv4, and IPv4-mapped IPv6, stay
+// one address per key.
+func TestClientAddr_IPv6KeysOnThe64(t *testing.T) {
+	tp, err := ParseTrustedProxies("172.18.0.0/16")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name, remote string
+		xff          []string
+		want         string
+	}{
+		{"IPv6 peer", "[2001:db8:1:2:aaaa::5]:443", nil, "2001:db8:1:2::/64"},
+		{"same /64, other address", "[2001:db8:1:2:ffff:1:2:3]:443", nil, "2001:db8:1:2::/64"},
+		{"other /64", "[2001:db8:1:3::5]:443", nil, "2001:db8:1:3::/64"},
+		{"IPv6 peer with a zone", "[fe80::1%eth0]:443", nil, "fe80::/64"},
+		{"IPv4 peer", "198.51.100.7:443", nil, "198.51.100.7"},
+		{"IPv4-mapped peer", "[::ffff:198.51.100.7]:443", nil, "198.51.100.7"},
+		{"IPv6 behind a trusted proxy", "172.18.0.3:5000", []string{"2001:db8:9:9::42"}, "2001:db8:9:9::/64"},
+		{"IPv4-mapped behind a trusted proxy", "172.18.0.3:5000", []string{"::ffff:198.51.100.8"}, "198.51.100.8"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := clientOf(t, tp, c.remote, c.xff...); got != c.want {
+				t.Errorf("client = %q, want %q", got, c.want)
+			}
+		})
+	}
+
+	// Over HTTP's limiter: two addresses in one /64 share one bucket.
+	kl := newKeyedLimiter("login", RateLimit{PerMinute: 1, Burst: 1}, newClock().now)
+	if ok, _ := kl.take(clientOf(t, tp, "[2001:db8:1:2::1]:1")); !ok {
+		t.Fatal("first try from the /64 is allowed")
+	}
+	if ok, _ := kl.take(clientOf(t, tp, "[2001:db8:1:2::2]:1")); ok {
+		t.Fatal("a second address in the same /64 shares the bucket")
+	}
+}
+
+// #109 review — a hostname that doesn't resolve at startup (the proxy
+// container isn't up yet) is retried on the short interval until it has
+// resolved once; then only the normal refresh runs.
+func TestTrustedProxies_RunRetriesUntilResolved(t *testing.T) {
+	var mu sync.Mutex
+	calls := 0
+	tp, err := parseTrustedProxies("web", func(context.Context, string) ([]netip.Addr, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		calls++
+		if calls <= 3 {
+			return nil, errors.New("no such host")
+		}
+		return []netip.Addr{netip.MustParseAddr("172.18.0.3")}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tp.Refresh(context.Background()) // startup: fails
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	// The normal refresh is an hour away: only the retry can resolve it.
+	go func() { tp.Run(ctx, time.Hour, time.Millisecond); close(done) }()
+	deadline := time.Now().Add(5 * time.Second)
+	for clientOf(t, tp, "172.18.0.3:1", "198.51.100.7") != "198.51.100.7" {
+		if time.Now().After(deadline) {
+			cancel()
+			<-done
+			t.Fatal("the hostname was never retried before the normal refresh")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	mu.Lock()
+	settled := calls
+	mu.Unlock()
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+	<-done
+	mu.Lock()
+	defer mu.Unlock()
+	if calls != settled {
+		t.Fatalf("lookups went on after the first success (%d then %d): the retry should stop", settled, calls)
+	}
+	if trustedRetryEvery != 10*time.Second {
+		t.Fatalf("trustedRetryEvery = %v, want 10s", trustedRetryEvery)
 	}
 }

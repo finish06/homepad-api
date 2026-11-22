@@ -211,6 +211,11 @@ func (s *server) handleAcceptReset(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+	// The password is set. A live link proves the account, so it also lifts
+	// the email's login lock (SPEC-signin-hardening AC-005). A dead link
+	// clears nothing, so the lock still says nothing about which emails have
+	// accounts.
+	s.loginFails.clear(loginFailKey(u.Email))
 	ended, err := s.sessions.DestroyAllForUser(ctx, u.ID, "")
 	if err != nil {
 		// The password is set and the link used; say so, and fail loudly so
@@ -228,9 +233,10 @@ func (s *server) handleAcceptReset(w http.ResponseWriter, r *http.Request) {
 
 // handleChangePassword — POST /api/me/password {currentPassword,
 // newPassword} → 204 (AC-013). Every other session of the account ends; this
-// one stays (Q3). A live reset link for the account is revoked. 403 wrong_password changes nothing and signs nobody out;
-// 409 sso_account; 400 for the rules; 429 after passwordFailMax wrong
-// current passwords (§3.3). A kid never gets here (classKidForbidden).
+// one stays (Q3). A live reset link for the account is revoked. 403
+// wrong_password changes nothing and signs nobody out; 409 sso_account; 400
+// for the rules; 429 after passwordFailMax wrong current passwords (§3.3). A
+// kid never gets here (classKidForbidden).
 func (s *server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	u, ok := s.currentUser(w, r)
 	if !ok {
@@ -282,6 +288,8 @@ func (s *server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+	// The new password also lifts the email's login lock.
+	s.loginFails.clear(loginFailKey(u.Email))
 	for _, id := range revoked {
 		log.Printf("reset: link %s revoked by a password change", id)
 	}

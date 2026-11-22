@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -778,4 +779,124 @@ func TestChangePassword_RevokesTheLiveResetLink(t *testing.T) {
 	code, _ = lookupReset(t, env, theirs.Token)
 	assert.Equal(t, http.StatusOK, code, "another account's link stays live")
 	assert.Contains(t, logs.String(), fmt.Sprintf("reset: link %s revoked by a password change", link.ID))
+}
+
+// lockEmail fails ten logins for email, so the per-email lock
+// (SPEC-signin-hardening AC-005) holds it, and checks the right password is
+// refused too.
+func lockEmail(t *testing.T, env *testsupport.Env, email, rightPassword string) {
+	t.Helper()
+	for i := 0; i < 10; i++ {
+		require.Equal(t, http.StatusUnauthorized, loginStatus(t, env, email, "not the password"), "try %d", i+1)
+	}
+	require.Equal(t, http.StatusTooManyRequests, loginStatus(t, env, email, rightPassword), "the email is locked")
+}
+
+// #109 review — accepting a reset link clears the email's login lock, so the
+// link an admin sends gets a locked-out adult back in. Lookup alone doesn't.
+func TestResetLink_AcceptClearsTheEmailLock(t *testing.T) {
+	env := resetEnv(t)
+	// The lock key folds case: locking one spelling locks them all.
+	lockEmail(t, env, "User@Homepad.test", userPassword)
+	link := mustResetLink(t, env, env.UserID)
+
+	code, b := lookupReset(t, env, link.Token)
+	require.Equal(t, http.StatusOK, code, string(b))
+	require.Equal(t, http.StatusTooManyRequests, loginStatus(t, env, "user@homepad.test", userPassword), "looking up changes nothing")
+
+	r, b := acceptReset(t, env, map[string]any{"token": link.Token, "password": newPassword})
+	require.Equal(t, http.StatusOK, r.StatusCode, string(b))
+	assert.Equal(t, http.StatusOK, loginStatus(t, env, "user@homepad.test", newPassword), "the lock is gone")
+}
+
+// #109 review — a dead reset link clears nothing: only a live link proves
+// the account, so the lock still says nothing about which emails exist.
+func TestResetLink_DeadLinkKeepsTheEmailLock(t *testing.T) {
+	env := resetEnv(t)
+	lockEmail(t, env, "user@homepad.test", userPassword)
+	r, b := acceptReset(t, env, map[string]any{"token": randomToken(t), "password": newPassword})
+	require.Equal(t, http.StatusNotFound, r.StatusCode, string(b))
+	assert.Equal(t, http.StatusTooManyRequests, loginStatus(t, env, "user@homepad.test", userPassword))
+}
+
+// #109 review — changing your own password while signed in clears your
+// email's login lock.
+func TestChangePassword_ClearsTheEmailLock(t *testing.T) {
+	env := resetEnv(t)
+	lockEmail(t, env, "user@homepad.test", userPassword)
+	code, _, b := changePassword(t, env, "session-one", map[string]any{"currentPassword": userPassword, "newPassword": newPassword})
+	require.Equal(t, http.StatusNoContent, code, string(b))
+	assert.Equal(t, http.StatusOK, loginStatus(t, env, "user@homepad.test", newPassword), "the lock is gone")
+}
+
+// #108 review — an admin demoted after the request's admin check but before
+// the link is stored gets 403 "admin role required", not a 500. The test
+// holds the admin's row locked so the create waits, demotes the admin, and
+// lets the create go on.
+func TestResetLink_CreateByAdminDemotedMeanwhileIs403(t *testing.T) {
+	env := resetEnv(t)
+	ctx := t.Context()
+	tx, err := env.Store.Pool().Begin(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback(ctx)
+	_, err = tx.Exec(ctx, `SELECT 1 FROM users WHERE id = $1 FOR UPDATE`, env.AdminID)
+	require.NoError(t, err)
+
+	done := make(chan plainResponse, 1)
+	go func() {
+		r, err := doJSONNoT(http.MethodPost, env.URL+"/api/admin/accounts/"+env.UserID+"/reset-link", "admin-session")
+		if err != nil {
+			r.body = []byte(err.Error())
+		}
+		done <- r
+	}()
+
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		var n int
+		require.NoError(t, env.Store.Pool().QueryRow(ctx,
+			`SELECT count(*) FROM pg_stat_activity
+			  WHERE datname = current_database() AND pid <> pg_backend_pid() AND wait_event_type = 'Lock'`).Scan(&n))
+		if n > 0 {
+			break
+		}
+		require.True(t, time.Now().Before(deadline), "the create never waited for the admin's row")
+		time.Sleep(10 * time.Millisecond)
+	}
+	_, err = tx.Exec(ctx, `UPDATE users SET role = 'user' WHERE id = $1`, env.AdminID)
+	require.NoError(t, err)
+	require.NoError(t, tx.Commit(ctx))
+
+	select {
+	case res := <-done:
+		assert.Equal(t, http.StatusForbidden, res.code, string(res.body))
+		assert.Equal(t, "admin role required\n", string(res.body))
+	case <-time.After(10 * time.Second):
+		t.Fatal("the create never finished")
+	}
+	var n int
+	require.NoError(t, env.Store.Pool().QueryRow(ctx, `SELECT count(*) FROM password_resets`).Scan(&n))
+	assert.Zero(t, n, "no link was made")
+}
+
+type plainResponse struct {
+	code int
+	body []byte
+}
+
+// doJSONNoT is an empty-bodied request with a session cookie, for a
+// goroutine, where require can't stop the test.
+func doJSONNoT(method, url, session string) (plainResponse, error) {
+	req, err := http.NewRequest(method, url, nil)
+	if err != nil {
+		return plainResponse{}, err
+	}
+	req.AddCookie(&http.Cookie{Name: "homepad_session", Value: session})
+	r, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return plainResponse{}, err
+	}
+	defer r.Body.Close()
+	b, err := io.ReadAll(r.Body)
+	return plainResponse{r.StatusCode, b}, err
 }
